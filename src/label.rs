@@ -20,6 +20,7 @@ impl Labels {
     pub fn load(config_json: &Path) -> Result<Labels, Error> {
         let cfg: Config = serde_json::from_slice(&std::fs::read(config_json)?)?;
         let n = cfg.id2label.len();
+        if n == 0 { return Err(Error::Bundle("id2label is empty".into())); }
         let mut out = vec![None; n];
         for (k, v) in cfg.id2label {
             let i: usize = k.parse().map_err(|_| Error::Bundle(format!("id2label key {k:?}")))?;

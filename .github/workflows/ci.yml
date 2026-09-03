@@ -17,4 +17,5 @@ jobs:
         with: { python-version: "3.12" }
       - uses: PyO3/maturin-action@v1
         with: { command: build, args: --release --locked --out dist }   # pyproject: no-default-features + python
-      - run: python -m pip install dist/*.whl onnxruntime && python -c "import koredact; print(koredact.DECODER_VERSION)"
+      - run: python -m pip install dist/*.whl onnxruntime
+      - run: python tests/python/smoke_tiny_bundle.py   # dynamic ORT load + Masker on the tiny fixture bundle

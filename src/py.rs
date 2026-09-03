@@ -1,6 +1,6 @@
 //! Python bindings (feature `python`): `_koredact.Masker(dir, ort_dylib=None, threads=1)`.
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::Mutex;
 
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -9,18 +9,23 @@ use crate::Masker as Inner;
 
 /// ort's environment is process-global and first-commit-wins: remember the dylib we committed so a later
 /// Masker asking for a different libonnxruntime fails loudly instead of silently using the first one.
-static ORT_DYLIB: OnceLock<PathBuf> = OnceLock::new();
+static ORT_DYLIB: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 fn init_ort(path: &str) -> PyResult<()> {
     let want = std::fs::canonicalize(path).map_err(|e| PyValueError::new_err(format!("onnxruntime dylib {path}: {e}")))?;
-    if let Some(have) = ORT_DYLIB.get() {
-        if *have != want {
-            return Err(PyRuntimeError::new_err(format!("onnxruntime already loaded from {}, cannot switch to {}", have.display(), want.display())));
+    let mut have = ORT_DYLIB.lock().map_err(|_| PyRuntimeError::new_err("ort init lock poisoned"))?;   // check+commit+set 직렬화
+    if let Some(h) = have.as_ref() {
+        if *h != want {
+            return Err(PyRuntimeError::new_err(format!("onnxruntime already loaded from {}, cannot switch to {}", h.display(), want.display())));
         }
         return Ok(());
     }
-    ort::init_from(&want).map_err(|e| PyRuntimeError::new_err(format!("onnxruntime dylib {}: {e}", want.display())))?.commit();
-    let _ = ORT_DYLIB.set(want);
+    let builder = ort::init_from(&want).map_err(|e| PyRuntimeError::new_err(format!("onnxruntime dylib {}: {e}", want.display())))?;
+    // commit() -> bool: false = an ort environment was already configured elsewhere in this process (not by us)
+    if !builder.commit() {
+        return Err(PyRuntimeError::new_err("ort environment already initialized outside koredact; cannot bind onnxruntime dylib"));
+    }
+    *have = Some(want);
     Ok(())
 }
 
