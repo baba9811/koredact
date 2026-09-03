@@ -27,18 +27,6 @@ impl EntityType {
     pub fn parse(s: &str) -> Option<EntityType> {
         EntityType::ALL.iter().copied().find(|t| t.as_str() == s)
     }
-
-    /// Replacement token — `entities.MASK_TOKEN` (DRIVER_LICENSE→`<DL>`, ADDRESS→`<ADDR>`).
-    pub fn mask_token(self) -> &'static str {
-        match self {
-            EntityType::DriverLicense => "<DL>",
-            EntityType::Address => "<ADDR>",
-            EntityType::Rrn => "<RRN>", EntityType::Brn => "<BRN>", EntityType::Frn => "<FRN>",
-            EntityType::Passport => "<PASSPORT>", EntityType::Card => "<CARD>", EntityType::Phone => "<PHONE>",
-            EntityType::Account => "<ACCOUNT>", EntityType::Email => "<EMAIL>", EntityType::Url => "<URL>",
-            EntityType::Code => "<CODE>", EntityType::Name => "<NAME>",
-        }
-    }
 }
 
 impl fmt::Display for EntityType {

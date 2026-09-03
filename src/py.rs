@@ -5,7 +5,9 @@ use std::sync::Mutex;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 
-use crate::{EntityType, Masker as Inner};
+use std::collections::HashMap;
+
+use crate::{EntityType, MaskTokens, Masker as Inner};
 
 /// ort's environment is process-global and first-commit-wins: remember the dylib we committed so a later
 /// Masker asking for a different libonnxruntime fails loudly instead of silently using the first one.
@@ -34,6 +36,17 @@ struct PyMasker { inner: Inner }
 
 fn err(e: crate::Error) -> PyErr { PyRuntimeError::new_err(e.to_string()) }
 
+/// Per-type replacement overrides on top of the `[TYPE]` default. Unknown type → ValueError.
+fn parse_mask_tokens(overrides: Option<HashMap<String, String>>) -> PyResult<MaskTokens> {
+    let mut tokens = MaskTokens::default();
+    for (name, token) in overrides.unwrap_or_default() {
+        let t = EntityType::parse(&name).ok_or_else(|| PyValueError::new_err(format!(
+            "unknown entity type {name:?} in mask_tokens; valid: {}", EntityType::ALL.map(|t| t.as_str()).join(", "))))?;
+        tokens.set(t, token);
+    }
+    Ok(tokens)
+}
+
 /// Parse user-supplied type names; None = all types. Unknown or empty → ValueError.
 fn parse_types(types: Option<Vec<String>>) -> PyResult<Option<Vec<EntityType>>> {
     let Some(names) = types else { return Ok(None) };
@@ -45,11 +58,19 @@ fn parse_types(types: Option<Vec<String>>) -> PyResult<Option<Vec<EntityType>>> 
 #[pymethods]
 impl PyMasker {
     #[new]
-    #[pyo3(signature = (dir, ort_dylib=None, threads=1))]
-    fn new(dir: String, ort_dylib: Option<String>, threads: usize) -> PyResult<Self> {
+    #[pyo3(signature = (dir, ort_dylib=None, threads=1, mask_tokens=None))]
+    fn new(dir: String, ort_dylib: Option<String>, threads: usize, mask_tokens: Option<HashMap<String, String>>) -> PyResult<Self> {
         if threads == 0 { return Err(PyValueError::new_err("threads must be >= 1")); }
+        let tokens = parse_mask_tokens(mask_tokens)?;   // validate before the expensive model load
         if let Some(p) = ort_dylib { init_ort(&p)?; }   // load-dynamic: libonnxruntime from the `onnxruntime` wheel
-        Ok(PyMasker { inner: Inner::from_dir(std::path::Path::new(&dir), threads).map_err(err)? })
+        let mut inner = Inner::from_dir(std::path::Path::new(&dir), threads).map_err(err)?;
+        inner.set_mask_tokens(tokens);
+        Ok(PyMasker { inner })
+    }
+
+    /// Current replacement text per type, e.g. {"PHONE": "[PHONE]", ...}.
+    fn mask_tokens(&self) -> HashMap<String, String> {
+        EntityType::ALL.iter().map(|t| (t.as_str().to_string(), self.inner.mask_tokens().get(*t).to_string())).collect()
     }
 
     /// [(start, end, type, score)] after the decoder. Inference runs with the GIL released; `&mut self`
@@ -82,5 +103,7 @@ fn _koredact(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyMasker>()?;
     m.add("DECODER_VERSION", crate::DECODER_VERSION)?;
     m.add("ENTITY_TYPES", EntityType::ALL.map(|t| t.as_str()).to_vec())?;
+    let defaults = MaskTokens::default();
+    m.add("DEFAULT_MASK_TOKENS", EntityType::ALL.iter().map(|t| (t.as_str(), defaults.get(*t).to_string())).collect::<HashMap<_, _>>())?;
     Ok(())
 }

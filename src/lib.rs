@@ -18,13 +18,14 @@ use serde::Deserialize;
 
 pub use decode::DECODER_VERSION;
 pub use error::Error;
+pub use mask::MaskTokens;
 pub use types::{EntityType, Span};
 
 #[derive(Deserialize)]
 struct TokConfig { #[serde(default = "default_max_len")] model_max_length: usize }
 fn default_max_len() -> usize { 512 }
 
-pub struct Masker { tok: tokenize::Tok, labels: label::Labels, model: infer::Model }
+pub struct Masker { tok: tokenize::Tok, labels: label::Labels, model: infer::Model, mask_tokens: MaskTokens }
 
 impl Masker {
     /// Load a published bundle dir: `config.json`, `tokenizer.json`, `tokenizer_config.json`, `onnx/model.onnx`.
@@ -37,8 +38,11 @@ impl Masker {
         let labels = label::Labels::load(&dir.join("config.json"))?;
         let model = infer::Model::load(&dir.join("onnx/model.onnx"), labels.0.len(), threads)?;
         let tok = tokenize::Tok::load(&dir.join("tokenizer.json"), tc.model_max_length)?;
-        Ok(Masker { tok, labels, model })
+        Ok(Masker { tok, labels, model, mask_tokens: MaskTokens::default() })
     }
+
+    pub fn mask_tokens(&self) -> &MaskTokens { &self.mask_tokens }
+    pub fn set_mask_tokens(&mut self, tokens: MaskTokens) { self.mask_tokens = tokens; }
 
     /// Raw model spans (windows merged, decoder NOT applied).
     pub fn predict_raw(&mut self, text: &str) -> Result<Vec<Span>, Error> {
@@ -75,7 +79,7 @@ impl Masker {
     pub fn mask(&mut self, text: &str) -> Result<String, Error> {
         let chars: Vec<char> = text.chars().collect();
         let spans = self.predict(text)?;
-        Ok(mask::render(&chars, &spans))
+        Ok(mask::render(&chars, &spans, &self.mask_tokens))
     }
 
     /// `predict` restricted to `keep` types. Filtering happens before overlap resolution, so a kept span
@@ -88,7 +92,7 @@ impl Masker {
     pub fn mask_types(&mut self, text: &str, keep: &[EntityType]) -> Result<String, Error> {
         let chars: Vec<char> = text.chars().collect();
         let spans = self.predict_types(text, keep)?;
-        Ok(mask::render(&chars, &spans))
+        Ok(mask::render(&chars, &spans, &self.mask_tokens))
     }
 }
 
@@ -115,10 +119,22 @@ mod tests {
         let chars: Vec<char> = "홍길동 01012345678".chars().collect();
         // NAME (score .9) overlaps PHONE (score .5) on chars 2..6; unfiltered render keeps NAME only there.
         let spans = vec![Span::new(0, 6, EntityType::Name, 0.9), Span::new(2, 15, EntityType::Phone, 0.5)];
-        assert_eq!(mask::render(&chars, &spans), "<NAME>012345678");
+        let tokens = MaskTokens::default();
+        assert_eq!(mask::render(&chars, &spans, &tokens), "[NAME]012345678");
         let only_phone = keep_types(spans.clone(), &[EntityType::Phone]);
         assert_eq!(only_phone.len(), 1);
-        assert_eq!(mask::render(&chars, &only_phone), "홍길<PHONE>");
+        assert_eq!(mask::render(&chars, &only_phone, &tokens), "홍길[PHONE]");
         assert!(keep_types(spans, &[]).is_empty());
+    }
+
+    #[test]
+    fn mask_tokens_default_and_override() {
+        let mut tokens = MaskTokens::default();
+        assert_eq!(tokens.get(EntityType::DriverLicense), "[DRIVER_LICENSE]");
+        tokens.set(EntityType::Phone, "***");
+        tokens.set(EntityType::Name, "");
+        let chars: Vec<char> = "홍길동 01012345678".chars().collect();
+        let spans = vec![Span::new(0, 3, EntityType::Name, 0.9), Span::new(4, 15, EntityType::Phone, 0.9)];
+        assert_eq!(mask::render(&chars, &spans, &tokens), " ***");
     }
 }

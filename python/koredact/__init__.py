@@ -2,15 +2,16 @@
 
     from koredact import Masker
     m = Masker.from_pretrained()            # infobank-corp/koredact-bert-base-onnx
-    m.mask("문의 010-1234-5678 홍길동")       # '문의 <PHONE> <NAME>'
+    m.mask("문의 010-1234-5678 홍길동")       # '문의 [PHONE] [NAME]'
     m.mask(text, types=["PHONE"])           # only PHONE masked, everything else left as-is
+    Masker.from_pretrained(mask_tokens={"PHONE": "***", "NAME": ""})   # per-type replacement text
     m.predict(text)                         # [Span(start, end, type, score)]
 """
 from __future__ import annotations
 
 import glob
 import os
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,6 +21,7 @@ DEFAULT_REPO = "infobank-corp/koredact-bert-base-onnx"   # ONNX repo; the PyTorc
 BUNDLE_FILES = ["config.json", "tokenizer.json", "tokenizer_config.json", "onnx/model.onnx"]
 DECODER_VERSION: str = _koredact.DECODER_VERSION
 ENTITY_TYPES: tuple[str, ...] = tuple(_koredact.ENTITY_TYPES)
+DEFAULT_MASK_TOKENS: dict[str, str] = dict(_koredact.DEFAULT_MASK_TOKENS)   # {"PHONE": "[PHONE]", ...}
 
 
 @dataclass(frozen=True)
@@ -44,17 +46,25 @@ def _onnxruntime_dylib() -> str:
 
 
 class Masker:
-    def __init__(self, bundle_dir: str | os.PathLike, *, threads: int = 1, ort_dylib: str | None = None):
-        self._inner = _koredact.Masker(str(bundle_dir), ort_dylib or _onnxruntime_dylib(), threads)
+    def __init__(self, bundle_dir: str | os.PathLike, *, threads: int = 1, ort_dylib: str | None = None,
+                 mask_tokens: Mapping[str, str] | None = None):
+        """`mask_tokens` overrides the replacement text per type (default `[TYPE]`); unknown types raise ValueError."""
+        self._inner = _koredact.Masker(str(bundle_dir), ort_dylib or _onnxruntime_dylib(), threads,
+                                       None if mask_tokens is None else {str(k): str(v) for k, v in mask_tokens.items()})
 
     @classmethod
-    def from_pretrained(cls, repo_id: str = DEFAULT_REPO, *, revision: str | None = None, threads: int = 1) -> "Masker":
+    def from_pretrained(cls, repo_id: str = DEFAULT_REPO, *, revision: str | None = None, threads: int = 1,
+                        mask_tokens: Mapping[str, str] | None = None) -> "Masker":
         """Download (cached) the bundle from the Hub, or accept a local directory path."""
         if Path(repo_id).is_dir():
-            return cls(repo_id, threads=threads)
+            return cls(repo_id, threads=threads, mask_tokens=mask_tokens)
         from huggingface_hub import snapshot_download
         local = snapshot_download(repo_id, revision=revision, allow_patterns=BUNDLE_FILES)
-        return cls(local, threads=threads)
+        return cls(local, threads=threads, mask_tokens=mask_tokens)
+
+    @property
+    def mask_tokens(self) -> dict[str, str]:
+        return self._inner.mask_tokens()
 
     def predict(self, text: str, types: Iterable[str] | None = None) -> list[Span]:
         """Decoded spans. `types` restricts to those entity types (see ENTITY_TYPES); unknown names raise ValueError."""
@@ -73,4 +83,4 @@ def _types(types: Iterable[str] | None) -> list[str] | None:
     return None if types is None else [str(t) for t in types]
 
 
-__all__ = ["Masker", "Span", "DEFAULT_REPO", "DECODER_VERSION", "ENTITY_TYPES"]
+__all__ = ["Masker", "Span", "DEFAULT_REPO", "DECODER_VERSION", "ENTITY_TYPES", "DEFAULT_MASK_TOKENS"]
