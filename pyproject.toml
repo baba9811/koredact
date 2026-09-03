@@ -1,0 +1,24 @@
+[build-system]
+requires = ["maturin>=1.15,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "koredact"
+version = "0.1.0"
+description = "Korean PII masking: BERT NER (ONNX) + rule decoder, Rust core"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.9"
+dependencies = [
+    "onnxruntime>=1.28",       # ships libonnxruntime; loaded at runtime via ort load-dynamic
+    "huggingface_hub>=0.30",   # snapshot_download of the model bundle
+]
+classifiers = ["Programming Language :: Rust", "Programming Language :: Python :: 3", "Topic :: Text Processing :: Linguistic"]
+
+[project.urls]
+Repository = "https://github.com/baba9811/koredact"
+
+[tool.maturin]
+python-source = "python"
+module-name = "koredact._koredact"
+features = ["pyo3/extension-module", "python"]

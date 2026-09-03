@@ -1,0 +1,577 @@
+{
+ "decoder_version": "v3_particle_strip_rrn_frn_7th_fragment_drop",
+ "note": "input spans = raw model output after window merge; expected = decode.apply output. Digits are synthetic.",
+ "cases": [
+  {
+   "name": "brn_particle_stripped",
+   "text": "사업자등록번호 123-45-67890를 확인했습니다.",
+   "spans": [
+    {
+     "start": 8,
+     "end": 21,
+     "entity": "BRN"
+    }
+   ],
+   "expected": [
+    {
+     "start": 8,
+     "end": 20,
+     "entity": "BRN"
+    }
+   ]
+  },
+  {
+   "name": "longest_particle_first",
+   "text": "번호 1234567890으로 접수",
+   "spans": [
+    {
+     "start": 3,
+     "end": 15,
+     "entity": "PHONE"
+    }
+   ],
+   "expected": [
+    {
+     "start": 3,
+     "end": 13,
+     "entity": "PHONE"
+    }
+   ]
+  },
+  {
+   "name": "particle_after_letter_kept",
+   "text": "여권 M1234567A가 확인됨",
+   "spans": [
+    {
+     "start": 3,
+     "end": 13,
+     "entity": "PASSPORT"
+    }
+   ],
+   "expected": [
+    {
+     "start": 3,
+     "end": 13,
+     "entity": "PASSPORT"
+    }
+   ]
+  },
+  {
+   "name": "name_not_numeric_type",
+   "text": "홍길동이 연락",
+   "spans": [
+    {
+     "start": 0,
+     "end": 4,
+     "entity": "NAME"
+    }
+   ],
+   "expected": [
+    {
+     "start": 0,
+     "end": 4,
+     "entity": "NAME"
+    }
+   ]
+  },
+  {
+   "name": "nosep13_seventh_5_rrn_to_frn",
+   "text": "등록번호 9001015123456 확인",
+   "spans": [
+    {
+     "start": 5,
+     "end": 18,
+     "entity": "RRN"
+    }
+   ],
+   "expected": [
+    {
+     "start": 5,
+     "end": 18,
+     "entity": "FRN"
+    }
+   ]
+  },
+  {
+   "name": "nosep13_seventh_8_rrn_to_frn",
+   "text": "번호 0512318234567 재확인",
+   "spans": [
+    {
+     "start": 3,
+     "end": 16,
+     "entity": "RRN"
+    }
+   ],
+   "expected": [
+    {
+     "start": 3,
+     "end": 16,
+     "entity": "FRN"
+    }
+   ]
+  },
+  {
+   "name": "nosep13_seventh_2_frn_to_rrn",
+   "text": "번호 8503052123456 확인",
+   "spans": [
+    {
+     "start": 3,
+     "end": 16,
+     "entity": "FRN"
+    }
+   ],
+   "expected": [
+    {
+     "start": 3,
+     "end": 16,
+     "entity": "RRN"
+    }
+   ]
+  },
+  {
+   "name": "nosep13_seventh_9_kept",
+   "text": "번호 9912319123456 확인",
+   "spans": [
+    {
+     "start": 3,
+     "end": 16,
+     "entity": "RRN"
+    }
+   ],
+   "expected": [
+    {
+     "start": 3,
+     "end": 16,
+     "entity": "RRN"
+    }
+   ]
+  },
+  {
+   "name": "nosep13_seventh_0_kept_frn",
+   "text": "번호 9912310123456 확인",
+   "spans": [
+    {
+     "start": 3,
+     "end": 16,
+     "entity": "FRN"
+    }
+   ],
+   "expected": [
+    {
+     "start": 3,
+     "end": 16,
+     "entity": "FRN"
+    }
+   ]
+  },
+  {
+   "name": "separated_rrn_not_relabeled",
+   "text": "번호 900101-5123456 확인",
+   "spans": [
+    {
+     "start": 3,
+     "end": 17,
+     "entity": "RRN"
+    }
+   ],
+   "expected": [
+    {
+     "start": 3,
+     "end": 17,
+     "entity": "RRN"
+    }
+   ]
+  },
+  {
+   "name": "twelve_digits_not_relabeled",
+   "text": "번호 900101512345 확인",
+   "spans": [
+    {
+     "start": 3,
+     "end": 15,
+     "entity": "RRN"
+    }
+   ],
+   "expected": [
+    {
+     "start": 3,
+     "end": 15,
+     "entity": "RRN"
+    }
+   ]
+  },
+  {
+   "name": "fullwidth_digits_not_relabeled",
+   "text": "번호 ９００１０１５１２３４５６ 확인",
+   "spans": [
+    {
+     "start": 3,
+     "end": 16,
+     "entity": "RRN"
+    }
+   ],
+   "expected": [
+    {
+     "start": 3,
+     "end": 16,
+     "entity": "RRN"
+    }
+   ]
+  },
+  {
+   "name": "other_type_13_digits_untouched",
+   "text": "번호 9001015123456 확인",
+   "spans": [
+    {
+     "start": 3,
+     "end": 16,
+     "entity": "CARD"
+    }
+   ],
+   "expected": [
+    {
+     "start": 3,
+     "end": 16,
+     "entity": "CARD"
+    }
+   ]
+  },
+  {
+   "name": "particle_then_relabel",
+   "text": "외국인등록번호 9001015123456가 확인됨",
+   "spans": [
+    {
+     "start": 8,
+     "end": 22,
+     "entity": "RRN"
+    }
+   ],
+   "expected": [
+    {
+     "start": 8,
+     "end": 21,
+     "entity": "FRN"
+    }
+   ]
+  },
+  {
+   "name": "already_frn_seventh_6_unchanged",
+   "text": "번호 7707076123456 확인",
+   "spans": [
+    {
+     "start": 3,
+     "end": 16,
+     "entity": "FRN"
+    }
+   ],
+   "expected": [
+    {
+     "start": 3,
+     "end": 16,
+     "entity": "FRN"
+    }
+   ]
+  },
+  {
+   "name": "url_trailing_comma_fragment_dropped",
+   "text": "문의 https://example.test/path, 안내",
+   "spans": [
+    {
+     "start": 3,
+     "end": 28,
+     "entity": "URL"
+    },
+    {
+     "start": 28,
+     "end": 29,
+     "entity": "URL"
+    }
+   ],
+   "expected": [
+    {
+     "start": 3,
+     "end": 28,
+     "entity": "URL"
+    }
+   ]
+  },
+  {
+   "name": "email_particle_fragment_dropped",
+   "text": "메일 user@example.test을 확인",
+   "spans": [
+    {
+     "start": 3,
+     "end": 20,
+     "entity": "EMAIL"
+    },
+    {
+     "start": 20,
+     "end": 21,
+     "entity": "EMAIL"
+    }
+   ],
+   "expected": [
+    {
+     "start": 3,
+     "end": 20,
+     "entity": "EMAIL"
+    }
+   ]
+  },
+  {
+   "name": "one_char_alnum_span_kept",
+   "text": "담당 김 확인",
+   "spans": [
+    {
+     "start": 3,
+     "end": 4,
+     "entity": "NAME"
+    }
+   ],
+   "expected": [
+    {
+     "start": 3,
+     "end": 4,
+     "entity": "NAME"
+    }
+   ]
+  },
+  {
+   "name": "email_particle_fragment_gap1_dropped",
+   "text": "메일 user@example.test 을 확인",
+   "spans": [
+    {
+     "start": 3,
+     "end": 20,
+     "entity": "EMAIL"
+    },
+    {
+     "start": 21,
+     "end": 22,
+     "entity": "EMAIL"
+    }
+   ],
+   "expected": [
+    {
+     "start": 3,
+     "end": 20,
+     "entity": "EMAIL"
+    }
+   ]
+  },
+  {
+   "name": "email_particle_non_adjacent_kept",
+   "text": "메일 user@example.test 확인 을 전달",
+   "spans": [
+    {
+     "start": 3,
+     "end": 20,
+     "entity": "EMAIL"
+    },
+    {
+     "start": 24,
+     "end": 25,
+     "entity": "EMAIL"
+    }
+   ],
+   "expected": [
+    {
+     "start": 3,
+     "end": 20,
+     "entity": "EMAIL"
+    },
+    {
+     "start": 24,
+     "end": 25,
+     "entity": "EMAIL"
+    }
+   ]
+  },
+  {
+   "name": "adjacent_particle_of_different_type_kept",
+   "text": "메일 user@example.test을 확인",
+   "spans": [
+    {
+     "start": 3,
+     "end": 20,
+     "entity": "EMAIL"
+    },
+    {
+     "start": 20,
+     "end": 21,
+     "entity": "NAME"
+    }
+   ],
+   "expected": [
+    {
+     "start": 3,
+     "end": 20,
+     "entity": "EMAIL"
+    },
+    {
+     "start": 20,
+     "end": 21,
+     "entity": "NAME"
+    }
+   ]
+  },
+  {
+   "name": "particle_fragment_with_internal_space_dropped",
+   "text": "메일 user@example.test으 로 확인",
+   "spans": [
+    {
+     "start": 3,
+     "end": 20,
+     "entity": "EMAIL"
+    },
+    {
+     "start": 20,
+     "end": 23,
+     "entity": "EMAIL"
+    }
+   ],
+   "expected": [
+    {
+     "start": 3,
+     "end": 20,
+     "entity": "EMAIL"
+    }
+   ]
+  },
+  {
+   "name": "name_particle_syllable_kept",
+   "text": "수신 홍 이 님",
+   "spans": [
+    {
+     "start": 3,
+     "end": 4,
+     "entity": "NAME"
+    },
+    {
+     "start": 5,
+     "end": 6,
+     "entity": "NAME"
+    }
+   ],
+   "expected": [
+    {
+     "start": 3,
+     "end": 4,
+     "entity": "NAME"
+    },
+    {
+     "start": 5,
+     "end": 6,
+     "entity": "NAME"
+    }
+   ]
+  },
+  {
+   "name": "punct_only_span_is_not_an_anchor",
+   "text": "메일 user@example.test) 을",
+   "spans": [
+    {
+     "start": 3,
+     "end": 20,
+     "entity": "EMAIL"
+    },
+    {
+     "start": 20,
+     "end": 21,
+     "entity": "EMAIL"
+    },
+    {
+     "start": 22,
+     "end": 23,
+     "entity": "EMAIL"
+    }
+   ],
+   "expected": [
+    {
+     "start": 3,
+     "end": 20,
+     "entity": "EMAIL"
+    },
+    {
+     "start": 22,
+     "end": 23,
+     "entity": "EMAIL"
+    }
+   ]
+  },
+  {
+   "name": "email_particle_ege_fragment_dropped",
+   "text": "메일 user@example.test에게 전달",
+   "spans": [
+    {
+     "start": 3,
+     "end": 20,
+     "entity": "EMAIL"
+    },
+    {
+     "start": 20,
+     "end": 22,
+     "entity": "EMAIL"
+    }
+   ],
+   "expected": [
+    {
+     "start": 3,
+     "end": 20,
+     "entity": "EMAIL"
+    }
+   ]
+  },
+  {
+   "name": "url_particle_kkaji_gap1_fragment_dropped",
+   "text": "링크 https://example.test/a 까지 확인",
+   "spans": [
+    {
+     "start": 3,
+     "end": 25,
+     "entity": "URL"
+    },
+    {
+     "start": 26,
+     "end": 28,
+     "entity": "URL"
+    }
+   ],
+   "expected": [
+    {
+     "start": 3,
+     "end": 25,
+     "entity": "URL"
+    }
+   ]
+  },
+  {
+   "name": "non_particle_syllable_fragment_kept",
+   "text": "메일 user@example.test게 확인",
+   "spans": [
+    {
+     "start": 3,
+     "end": 20,
+     "entity": "EMAIL"
+    },
+    {
+     "start": 20,
+     "end": 21,
+     "entity": "EMAIL"
+    }
+   ],
+   "expected": [
+    {
+     "start": 3,
+     "end": 20,
+     "entity": "EMAIL"
+    },
+    {
+     "start": 20,
+     "end": 21,
+     "entity": "EMAIL"
+    }
+   ]
+  }
+ ]
+}

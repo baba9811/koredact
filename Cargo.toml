@@ -1,0 +1,31 @@
+[package]
+name = "koredact"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Korean PII masking runtime: BERT NER (ONNX) + rule decoder"
+repository = "https://github.com/baba9811/koredact"
+
+[lib]
+name = "koredact"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["download-binaries"]
+# Rust 단독 사용: 빌드 시 ORT prebuilt 정적 링크(linux glibc >= 2.39 · macOS arm64 · windows)
+download-binaries = ["ort/download-binaries", "ort/tls-native"]
+# Python 휠: 링크 없이 런타임에 libonnxruntime 로드(pip onnxruntime 동봉 dylib) — manylinux 호환
+load-dynamic = ["ort/load-dynamic"]
+python = ["dep:pyo3", "load-dynamic"]
+
+[dependencies]
+ort = { version = "2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "api-27"] }
+ndarray = "0.17"
+tokenizers = { version = "0.23", default-features = false, features = ["fancy-regex"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+pyo3 = { version = "0.29", features = ["abi3-py39", "extension-module"], optional = true }
+
+[dev-dependencies]
+anyhow = "1"

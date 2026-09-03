@@ -1,0 +1,7 @@
+/target
+/.venv
+__pycache__/
+*.pyc
+/dist
+/python/koredact/*.so
+/python/koredact/*.pyd
