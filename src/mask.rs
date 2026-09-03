@@ -71,13 +71,18 @@ pub fn combine_backstop(ner: Vec<Span>, back: Vec<Span>, zones: &[(usize, usize)
     out
 }
 
+/// Adjacent pieces of the same type render as one token — a model span plus its backstop remainder
+/// (`https://example.test/` + `a`) is one URL to the reader, not two.
 pub fn render(chars: &[char], spans: &[Span], tokens: &MaskTokens) -> String {
     let mut out = String::with_capacity(chars.len());
     let mut i = 0;
+    let mut last: Option<(usize, EntityType)> = None;   // (end, type) of the previous rendered span
     for s in resolve_overlaps(spans) {
+        if last == Some((s.start, s.entity)) { i = s.end; last = Some((s.end, s.entity)); continue; }
         out.extend(&chars[i..s.start]);
         out.push_str(tokens.get(s.entity));
         i = s.end;
+        last = Some((s.end, s.entity));
     }
     out.extend(&chars[i..]);
     out
@@ -98,6 +103,15 @@ mod tests {
         assert_eq!(kept.iter().map(|s| (s.start, s.end, s.entity)).collect::<Vec<_>>(),
                    [(0, 3, E::Name), (3, 10, E::Address)]);
         assert_eq!(render(&c("홍길동 서울시 강남구"), &spans, &MaskTokens::default()), "[NAME][ADDRESS]구");
+    }
+
+    #[test]
+    fn adjacent_same_type_pieces_render_as_one_token() {
+        let chars = c("링크 https://example.test/a 끝");
+        let spans = [Span::new(3, 24, E::Url, 0.9), Span::new(24, 25, E::Url, 0.6)];   // model + backstop remainder
+        assert_eq!(render(&chars, &spans, &MaskTokens::default()), "링크 [URL] 끝");
+        let mixed = [Span::new(3, 24, E::Url, 0.9), Span::new(24, 25, E::Num, 0.5)];   // different type stays separate
+        assert_eq!(render(&chars, &mixed, &MaskTokens::default()), "링크 [URL][NUM] 끝");
     }
 
     #[test]
