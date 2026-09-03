@@ -81,7 +81,7 @@ impl Masker {
     /// `predict` restricted to `keep` types. Filtering happens before overlap resolution, so a kept span
     /// is masked even where a dropped type scored higher on the same characters.
     pub fn predict_types(&mut self, text: &str, keep: &[EntityType]) -> Result<Vec<Span>, Error> {
-        Ok(self.predict(text)?.into_iter().filter(|s| keep.contains(&s.entity)).collect())
+        Ok(keep_types(self.predict(text)?, keep))
     }
 
     /// `mask` restricted to `keep` types; other types are left in clear text.
@@ -98,4 +98,27 @@ fn argmax_softmax(row: &[f32]) -> (usize, f32) {
     for (i, v) in row.iter().enumerate() { if *v > bv { bv = *v; best = i; } }
     let denom: f32 = row.iter().map(|v| (v - bv).exp()).sum();
     (best, 1.0 / denom)
+}
+
+/// Drop spans whose type is not in `keep`. Runs on decoded spans, i.e. before `mask::resolve_overlaps`,
+/// so restricting to a type can never lose one of its spans to a higher-scoring span of another type.
+pub fn keep_types(spans: Vec<Span>, keep: &[EntityType]) -> Vec<Span> {
+    spans.into_iter().filter(|s| keep.contains(&s.entity)).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kept_type_wins_over_dropped_higher_score_overlap() {
+        let chars: Vec<char> = "홍길동 01012345678".chars().collect();
+        // NAME (score .9) overlaps PHONE (score .5) on chars 2..6; unfiltered render keeps NAME only there.
+        let spans = vec![Span::new(0, 6, EntityType::Name, 0.9), Span::new(2, 15, EntityType::Phone, 0.5)];
+        assert_eq!(mask::render(&chars, &spans), "<NAME>012345678");
+        let only_phone = keep_types(spans.clone(), &[EntityType::Phone]);
+        assert_eq!(only_phone.len(), 1);
+        assert_eq!(mask::render(&chars, &only_phone), "홍길<PHONE>");
+        assert!(keep_types(spans, &[]).is_empty());
+    }
 }
