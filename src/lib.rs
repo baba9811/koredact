@@ -49,6 +49,9 @@ impl Masker {
             let chunk: String = chars[off..end].iter().collect();
             let enc = self.tok.encode(&chunk)?;
             let rows = self.model.logits(enc.get_ids(), enc.get_type_ids(), enc.get_attention_mask())?;
+            if rows.iter().any(|r| r.is_empty() || r.iter().any(|v| !v.is_finite())) {
+                return Err(Error::Bundle("non-finite or empty logits row".into()));
+            }
             let special = enc.get_special_tokens_mask();
             let offsets = enc.get_offsets();
             let toks: Vec<label::TokenPred> = rows.iter().enumerate()

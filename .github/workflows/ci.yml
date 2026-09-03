@@ -9,3 +9,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --no-default-features --features load-dynamic   # no ORT binary needed: decoder vectors + unit tests
+  wheel-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: PyO3/maturin-action@v1
+        with: { command: build, args: --release --locked --out dist }   # pyproject: no-default-features + python
+      - run: python -m pip install dist/*.whl onnxruntime && python -c "import koredact; print(koredact.DECODER_VERSION)"

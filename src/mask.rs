@@ -3,8 +3,9 @@ use crate::types::Span;
 
 pub fn resolve_overlaps(spans: &[Span]) -> Vec<Span> {
     let mut order: Vec<&Span> = spans.iter().collect();
-    order.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
-        .then((b.end - b.start).cmp(&(a.end - a.start))).then(a.start.cmp(&b.start)));
+    // total order: score desc (scores are finite — lib.rs rejects NaN logits), longer first, earlier first, then type
+    order.sort_by(|a, b| b.score.total_cmp(&a.score)
+        .then((b.end - b.start).cmp(&(a.end - a.start))).then(a.start.cmp(&b.start)).then(a.entity.cmp(&b.entity)));
     let mut kept: Vec<Span> = Vec::new();
     for s in order {
         if kept.iter().all(|k| s.end <= k.start || k.end <= s.start) { kept.push(s.clone()); }

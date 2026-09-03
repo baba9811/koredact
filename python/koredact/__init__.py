@@ -32,10 +32,12 @@ def _onnxruntime_dylib() -> str:
     import onnxruntime
     capi = Path(onnxruntime.__file__).parent / "capi"
     hits = [p for pat in ("libonnxruntime*.dylib", "libonnxruntime.so*", "onnxruntime.dll") for p in glob.glob(str(capi / pat))]
-    hits = [h for h in hits if "providers" not in os.path.basename(h)]
+    hits = sorted({h for h in hits if "providers" not in os.path.basename(h) and Path(h).is_file()})
     if not hits:
         raise RuntimeError(f"libonnxruntime not found under {capi}")
-    return sorted(hits, key=len)[0]
+    # prefer the unversioned runtime name, then shortest (most generic) name, then lexical — deterministic
+    return sorted(hits, key=lambda h: (not os.path.basename(h) in ("libonnxruntime.dylib", "libonnxruntime.so", "onnxruntime.dll"),
+                                       len(os.path.basename(h)), h))[0]
 
 
 class Masker:

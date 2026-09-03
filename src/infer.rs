@@ -10,6 +10,7 @@ pub struct Model { session: Session, pub n_labels: usize }
 
 impl Model {
     pub fn load(onnx: &Path, n_labels: usize, threads: usize) -> Result<Model, Error> {
+        if threads == 0 { return Err(Error::Bundle("threads must be >= 1".into())); }
         let session = Session::builder()?
             .with_intra_threads(threads).map_err(|e| Error::Bundle(format!("session options: {e}")))?
             .commit_from_file(onnx)?;

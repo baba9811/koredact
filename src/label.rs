@@ -57,6 +57,8 @@ pub fn group_simple(labels: &Labels, toks: &[TokenPred]) -> Vec<Span> {
             if let Some(ent) = lab.entity {
                 let last = group[group.len() - 1];
                 let score = group.iter().map(|t| t.score).sum::<f32>() / group.len() as f32;
+                // zero-width groups (all tokens with empty offsets) cannot exist as reference spans — the Python
+                // `Span` constructor raises on start >= end — so they are dropped here rather than propagated
                 if last.end > first.start { out.push(Span::new(first.start, last.end, ent, score)); }
             }
         }
