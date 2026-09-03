@@ -52,8 +52,9 @@ impl Model {
         let logits = outputs.get("logits").ok_or_else(|| Error::Bundle("onnx run returned no logits".into()))?;
         let (shape, data) = logits.try_extract_tensor::<f32>()?;
         let dims: Vec<i64> = shape.iter().copied().collect();
-        if dims.len() != 3 || dims[0] != 1 || dims[1] != seq || dims[2] as usize != self.n_labels
-            || data.len() != ids.len() * self.n_labels {
+        let expect_len = ids.len().checked_mul(self.n_labels)
+            .ok_or_else(|| Error::Bundle(format!("logits size overflow: {} x {}", ids.len(), self.n_labels)))?;
+        if dims.len() != 3 || dims[0] != 1 || dims[1] != seq || dims[2] as usize != self.n_labels || data.len() != expect_len {
             return Err(Error::Bundle(format!("logits shape {dims:?} / len {} != [1, {seq}, {}]", data.len(), self.n_labels)));
         }
         Ok(data.chunks(self.n_labels).map(|r| r.to_vec()).collect())
