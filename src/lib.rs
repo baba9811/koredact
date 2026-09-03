@@ -95,11 +95,12 @@ impl Masker {
     pub fn predict_opts(&mut self, text: &str, keep: Option<&[EntityType]>, backstop: bool) -> Result<Vec<Span>, Error> {
         let chars: Vec<char> = text.chars().collect();
         let raw = self.predict_raw(text)?;
-        let mut spans = decode::apply(&chars, &raw);
-        if backstop {
-            spans = mask::combine_backstop(spans, backstop::find(&chars), &backstop::var_zones(&chars));
-        }
-        Ok(match keep { Some(k) => keep_types(spans, k), None => spans })
+        let filter = |spans: Vec<Span>| match keep { Some(k) => keep_types(spans, k), None => spans };
+        // filter each source before merging: a dropped model span must not clip (and then abandon) a kept span
+        let spans = filter(decode::apply(&chars, &raw));
+        if !backstop { return Ok(spans); }
+        let back = filter(backstop::find(&chars));
+        Ok(mask::combine_backstop(spans, back, &backstop::var_zones(&chars)))
     }
 
     pub fn mask_opts(&mut self, text: &str, keep: Option<&[EntityType]>, backstop: bool) -> Result<String, Error> {
@@ -126,6 +127,16 @@ pub fn keep_types(spans: Vec<Span>, keep: &[EntityType]) -> Vec<Span> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn filter_applies_to_both_sources_before_merge() {
+        // model NAME 0..11 covers the digit run; with keep=[NUM] the NAME must not clip the NUM away
+        let chars: Vec<char> = "01012345678".chars().collect();
+        let ner = keep_types(vec![Span::new(0, 11, EntityType::Name, 0.9)], &[EntityType::Num]);
+        let back = keep_types(backstop::find(&chars), &[EntityType::Num]);
+        let out = mask::combine_backstop(ner, back, &[]);
+        assert_eq!(out.iter().map(|s| (s.start, s.end, s.entity)).collect::<Vec<_>>(), [(0, 11, EntityType::Num)]);
+    }
 
     #[test]
     fn kept_type_wins_over_dropped_higher_score_overlap() {

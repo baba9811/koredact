@@ -22,13 +22,14 @@ static EMAIL: LazyLock<Regex> =
 static URL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?i)(?:https?://|www\.)[^\s\x{3131}-\x{318e}\x{ac00}-\x{d7a3}<>"\x{201c}\x{201d}\x{2018}\x{2019}▶☎]+"#).unwrap()
 });
-const URL_TRAIL: &str = ".,;:!?…\u{3002}'";
+const URL_TRAIL: &str = ".,;:!?…\u{3002}'\u{ff0c}\u{ff01}\u{ff1f}\u{ff1a}\u{ff1b}\u{3001}";   // incl. fullwidth ，！？：；、
 // Partially masked mobile number, `010-****-1234` / `010-1234-****`. Only the 010 prefix (011/016-019
 // collide with account and code prefixes) and exactly four stars; boundary digits are rejected below.
 static PHONE_PARTIAL: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"010[-. ]?(?:\*{4}[-. ]?[0-9]{4}|[0-9]{4}[-. ]?\*{4})").unwrap());
+    LazyLock::new(|| Regex::new(r"010[-. ]?(?:\*{4}[-. ]?\d{4}|\d{4}[-. ]?\*{4})").unwrap());
 // Digit run joined by at most one separator char per gap: "010 1234 5678" merges, "90. 85. 78" does not.
-static RUN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[0-9]+(?:[-. ][0-9]+)*").unwrap());
+// `\d` is Unicode-aware here (any decimal digit, e.g. fullwidth １２３), matching the Python reference.
+static RUN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\d+(?:[-. ]\d+)*").unwrap());
 
 /// Byte offsets of each char plus the text itself, so regex byte matches map back to char indices.
 struct Text { s: String, byte_of_char: Vec<usize> }
@@ -58,7 +59,11 @@ fn trim_url_end(seg: &str) -> usize {
     while end > 0 {
         let ch = chars[end - 1];
         if URL_TRAIL.contains(ch) { end -= 1; continue; }
-        let opener = match ch { ')' => '(', ']' => '[', '}' => '{', _ => '\0' };
+        let opener = match ch {
+            ')' => '(', ']' => '[', '}' => '{',
+            '\u{ff09}' => '\u{ff08}', '\u{3011}' => '\u{3010}', '\u{300d}' => '\u{300c}', '\u{300f}' => '\u{300e}',   // ）】」』
+            _ => '\0',
+        };
         if opener != '\0' {
             let head = &chars[..end];
             let opens = head.iter().filter(|c| **c == opener).count();
@@ -84,12 +89,12 @@ pub fn find(chars: &[char]) -> Vec<Span> {
     }
     for m in PHONE_PARTIAL.find_iter(&t.s) {
         let (start, end) = (t.char_at(m.start()), t.char_at(m.end()));
-        let digit_before = start > 0 && chars[start - 1].is_ascii_digit();
-        let digit_after = end < chars.len() && chars[end].is_ascii_digit();
+        let digit_before = start > 0 && chars[start - 1].is_numeric();
+        let digit_after = end < chars.len() && chars[end].is_numeric();
         if !digit_before && !digit_after { out.push(Span::new(start, end, EntityType::Phone, SCORE_TYPED)); }
     }
     for m in RUN.find_iter(&t.s) {
-        if m.as_str().chars().filter(|c| c.is_ascii_digit()).count() >= NUM_MIN_DIGITS {
+        if m.as_str().chars().filter(|c| c.is_numeric()).count() >= NUM_MIN_DIGITS {
             out.push(Span::new(t.char_at(m.start()), t.char_at(m.end()), EntityType::Num, SCORE_NUM));
         }
     }
@@ -182,6 +187,28 @@ mod tests {
         for (text, want) in cases {
             assert_eq!(typed(text, EntityType::Url), [want], "{text}");
         }
+    }
+
+    #[test]
+    fn fullwidth_punctuation_and_closers_are_trimmed() {
+        let cases = [
+            ("링크 https://example.test/a， 확인", "https://example.test/a"),
+            ("（https://example.test/a） 확인", "https://example.test/a"),
+            ("【https://example.test/q】 참고", "https://example.test/q"),
+            ("https://example.test/x？ 끝", "https://example.test/x"),
+        ];
+        for (text, want) in cases {
+            assert_eq!(typed(text, EntityType::Url), [want], "{text}");
+        }
+    }
+
+    #[test]
+    fn unicode_digits_count_and_offsets_survive_multibyte_text() {
+        // fullwidth digits are decimal digits too; offsets are char indices even after multibyte Hangul
+        let c = chars("번호 １２３４５６７ 끝 그리고 010-1234-5678");
+        let nums: Vec<String> = find(&c).into_iter().filter(|s| s.entity == EntityType::Num).map(|s| char_slice(&c, s.start, s.end)).collect();
+        assert_eq!(nums, ["１２３４５６７", "010-1234-5678"]);
+        assert!(typed("계좌 ０10-****-1234", EntityType::Phone).is_empty());   // fullwidth digit before → boundary digit
     }
 
     #[test]
