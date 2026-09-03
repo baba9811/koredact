@@ -77,6 +77,19 @@ impl Masker {
         let spans = self.predict(text)?;
         Ok(mask::render(&chars, &spans))
     }
+
+    /// `predict` restricted to `keep` types. Filtering happens before overlap resolution, so a kept span
+    /// is masked even where a dropped type scored higher on the same characters.
+    pub fn predict_types(&mut self, text: &str, keep: &[EntityType]) -> Result<Vec<Span>, Error> {
+        Ok(self.predict(text)?.into_iter().filter(|s| keep.contains(&s.entity)).collect())
+    }
+
+    /// `mask` restricted to `keep` types; other types are left in clear text.
+    pub fn mask_types(&mut self, text: &str, keep: &[EntityType]) -> Result<String, Error> {
+        let chars: Vec<char> = text.chars().collect();
+        let spans = self.predict_types(text, keep)?;
+        Ok(mask::render(&chars, &spans))
+    }
 }
 
 /// argmax + softmax probability of the argmax (transformers pipeline `scores` are softmaxed).

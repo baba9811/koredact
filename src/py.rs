@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 
-use crate::Masker as Inner;
+use crate::{EntityType, Masker as Inner};
 
 /// ort's environment is process-global and first-commit-wins: remember the dylib we committed so a later
 /// Masker asking for a different libonnxruntime fails loudly instead of silently using the first one.
@@ -34,6 +34,14 @@ struct PyMasker { inner: Inner }
 
 fn err(e: crate::Error) -> PyErr { PyRuntimeError::new_err(e.to_string()) }
 
+/// Parse user-supplied type names; None = all types. Unknown or empty → ValueError.
+fn parse_types(types: Option<Vec<String>>) -> PyResult<Option<Vec<EntityType>>> {
+    let Some(names) = types else { return Ok(None) };
+    if names.is_empty() { return Err(PyValueError::new_err("types must not be empty (omit it to mask every type)")); }
+    names.iter().map(|n| EntityType::parse(n).ok_or_else(|| PyValueError::new_err(format!(
+        "unknown entity type {n:?}; valid: {}", EntityType::ALL.map(|t| t.as_str()).join(", "))))).collect::<PyResult<Vec<_>>>().map(Some)
+}
+
 #[pymethods]
 impl PyMasker {
     #[new]
@@ -46,9 +54,11 @@ impl PyMasker {
 
     /// [(start, end, type, score)] after the decoder. Inference runs with the GIL released; `&mut self`
     /// serializes calls on one Masker (ORT intra-op threads parallelize inside a call).
-    fn predict(&mut self, py: Python<'_>, text: String) -> PyResult<Vec<(usize, usize, String, f32)>> {
+    #[pyo3(signature = (text, types=None))]
+    fn predict(&mut self, py: Python<'_>, text: String, types: Option<Vec<String>>) -> PyResult<Vec<(usize, usize, String, f32)>> {
+        let keep = parse_types(types)?;
         let inner = &mut self.inner;
-        let spans = py.detach(move || inner.predict(&text)).map_err(err)?;
+        let spans = py.detach(move || match keep { Some(k) => inner.predict_types(&text, &k), None => inner.predict(&text) }).map_err(err)?;
         Ok(spans.into_iter().map(|s| (s.start, s.end, s.entity.as_str().to_string(), s.score)).collect())
     }
 
@@ -59,9 +69,11 @@ impl PyMasker {
         Ok(spans.into_iter().map(|s| (s.start, s.end, s.entity.as_str().to_string(), s.score)).collect())
     }
 
-    fn mask(&mut self, py: Python<'_>, text: String) -> PyResult<String> {
+    #[pyo3(signature = (text, types=None))]
+    fn mask(&mut self, py: Python<'_>, text: String, types: Option<Vec<String>>) -> PyResult<String> {
+        let keep = parse_types(types)?;
         let inner = &mut self.inner;
-        py.detach(move || inner.mask(&text)).map_err(err)
+        py.detach(move || match keep { Some(k) => inner.mask_types(&text, &k), None => inner.mask(&text) }).map_err(err)
     }
 }
 
@@ -69,5 +81,6 @@ impl PyMasker {
 fn _koredact(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyMasker>()?;
     m.add("DECODER_VERSION", crate::DECODER_VERSION)?;
+    m.add("ENTITY_TYPES", EntityType::ALL.map(|t| t.as_str()).to_vec())?;
     Ok(())
 }

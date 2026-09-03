@@ -3,12 +3,14 @@
     from koredact import Masker
     m = Masker.from_pretrained()            # infobank-corp/koredact-bert-base
     m.mask("문의 010-1234-5678 홍길동")       # '문의 <PHONE> <NAME>'
+    m.mask(text, types=["PHONE"])           # only PHONE masked, everything else left as-is
     m.predict(text)                         # [Span(start, end, type, score)]
 """
 from __future__ import annotations
 
 import glob
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,6 +19,7 @@ from . import _koredact
 DEFAULT_REPO = "infobank-corp/koredact-bert-base"
 BUNDLE_FILES = ["config.json", "tokenizer.json", "tokenizer_config.json", "onnx/model.onnx"]
 DECODER_VERSION: str = _koredact.DECODER_VERSION
+ENTITY_TYPES: tuple[str, ...] = tuple(_koredact.ENTITY_TYPES)
 
 
 @dataclass(frozen=True)
@@ -53,15 +56,21 @@ class Masker:
         local = snapshot_download(repo_id, revision=revision, allow_patterns=BUNDLE_FILES)
         return cls(local, threads=threads)
 
-    def predict(self, text: str) -> list[Span]:
-        return [Span(*t) for t in self._inner.predict(text)]
+    def predict(self, text: str, types: Iterable[str] | None = None) -> list[Span]:
+        """Decoded spans. `types` restricts to those entity types (see ENTITY_TYPES); unknown names raise ValueError."""
+        return [Span(*t) for t in self._inner.predict(text, _types(types))]
 
     def predict_raw(self, text: str) -> list[Span]:
         """Model output after window merge, before the decoder (for diagnostics)."""
         return [Span(*t) for t in self._inner.predict_raw(text)]
 
-    def mask(self, text: str) -> str:
-        return self._inner.mask(text)
+    def mask(self, text: str, types: Iterable[str] | None = None) -> str:
+        """Masked text. `types` restricts masking to those entity types; the rest stays in clear text."""
+        return self._inner.mask(text, _types(types))
 
 
-__all__ = ["Masker", "Span", "DEFAULT_REPO", "DECODER_VERSION"]
+def _types(types: Iterable[str] | None) -> list[str] | None:
+    return None if types is None else [str(t) for t in types]
+
+
+__all__ = ["Masker", "Span", "DEFAULT_REPO", "DECODER_VERSION", "ENTITY_TYPES"]
