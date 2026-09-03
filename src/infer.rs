@@ -6,7 +6,7 @@ use ort::value::Tensor;
 
 use crate::error::Error;
 
-pub struct Model { session: Session, pub n_labels: usize, wants_type_ids: bool }
+pub struct Model { session: Session, n_labels: usize, wants_type_ids: bool }
 
 impl Model {
     pub fn load(onnx: &Path, n_labels: usize, threads: usize) -> Result<Model, Error> {
@@ -32,8 +32,13 @@ impl Model {
         Ok(Model { session, n_labels, wants_type_ids })
     }
 
+    pub fn n_labels(&self) -> usize { self.n_labels }
+
     /// Returns per-token logits rows (seq × n_labels).
     pub fn logits(&mut self, ids: &[u32], type_ids: &[u32], mask: &[u32]) -> Result<Vec<Vec<f32>>, Error> {
+        if ids.is_empty() || mask.len() != ids.len() || (self.wants_type_ids && type_ids.len() != ids.len()) {
+            return Err(Error::Bundle(format!("encoding lengths differ: ids {} mask {} type_ids {}", ids.len(), mask.len(), type_ids.len())));
+        }
         let seq = ids.len() as i64;
         let to_i64 = |v: &[u32]| v.iter().map(|x| *x as i64).collect::<Vec<i64>>();
         let mut feed = ort::inputs![
@@ -47,8 +52,9 @@ impl Model {
         let logits = outputs.get("logits").ok_or_else(|| Error::Bundle("onnx run returned no logits".into()))?;
         let (shape, data) = logits.try_extract_tensor::<f32>()?;
         let dims: Vec<i64> = shape.iter().copied().collect();
-        if dims.len() != 3 || dims[0] != 1 || dims[1] != seq || dims[2] as usize != self.n_labels {
-            return Err(Error::Bundle(format!("logits shape {dims:?} != [1, {seq}, {}]", self.n_labels)));
+        if dims.len() != 3 || dims[0] != 1 || dims[1] != seq || dims[2] as usize != self.n_labels
+            || data.len() != ids.len() * self.n_labels {
+            return Err(Error::Bundle(format!("logits shape {dims:?} / len {} != [1, {seq}, {}]", data.len(), self.n_labels)));
         }
         Ok(data.chunks(self.n_labels).map(|r| r.to_vec()).collect())
     }
