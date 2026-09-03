@@ -25,6 +25,10 @@ impl Model {
         if names.len() != 2 + wants_type_ids as usize {
             return Err(Error::Bundle(format!("unexpected onnx inputs {names:?}")));
         }
+        let outs: Vec<String> = session.outputs().iter().map(|o| o.name().to_string()).collect();
+        if !outs.iter().any(|n| n == "logits") {
+            return Err(Error::Bundle(format!("onnx graph lacks output logits: {outs:?}")));
+        }
         Ok(Model { session, n_labels, wants_type_ids })
     }
 
@@ -40,7 +44,8 @@ impl Model {
             feed.push(("token_type_ids".into(), Tensor::from_array((vec![1i64, seq], to_i64(type_ids)))?.into()));
         }
         let outputs = self.session.run(feed)?;
-        let (shape, data) = outputs["logits"].try_extract_tensor::<f32>()?;
+        let logits = outputs.get("logits").ok_or_else(|| Error::Bundle("onnx run returned no logits".into()))?;
+        let (shape, data) = logits.try_extract_tensor::<f32>()?;
         let dims: Vec<i64> = shape.iter().copied().collect();
         if dims.len() != 3 || dims[0] != 1 || dims[1] != seq || dims[2] as usize != self.n_labels {
             return Err(Error::Bundle(format!("logits shape {dims:?} != [1, {seq}, {}]", self.n_labels)));
