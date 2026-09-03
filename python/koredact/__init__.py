@@ -1,7 +1,7 @@
 """koredact — Korean PII masking (BERT NER ONNX + rule decoder), Rust core.
 
     from koredact import Masker
-    m = Masker.from_pretrained()            # infobank-corp/koredact-bert-base
+    m = Masker.from_pretrained()            # infobank-corp/koredact-bert-base-onnx
     m.mask("문의 010-1234-5678 홍길동")       # '문의 <PHONE> <NAME>'
     m.mask(text, types=["PHONE"])           # only PHONE masked, everything else left as-is
     m.predict(text)                         # [Span(start, end, type, score)]
@@ -16,7 +16,7 @@ from pathlib import Path
 
 from . import _koredact
 
-DEFAULT_REPO = "infobank-corp/koredact-bert-base"
+DEFAULT_REPO = "infobank-corp/koredact-bert-base-onnx"   # ONNX repo; the PyTorch weights live under the same name without -onnx
 BUNDLE_FILES = ["config.json", "tokenizer.json", "tokenizer_config.json", "onnx/model.onnx"]
 DECODER_VERSION: str = _koredact.DECODER_VERSION
 ENTITY_TYPES: tuple[str, ...] = tuple(_koredact.ENTITY_TYPES)
