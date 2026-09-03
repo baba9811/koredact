@@ -4,6 +4,7 @@
     m = Masker.from_pretrained()            # infobank-corp/koredact-bert-base-onnx
     m.mask("문의 010-1234-5678 홍길동")       # '문의 [PHONE] [NAME]'
     m.mask(text, types=["PHONE"])           # only PHONE masked, everything else left as-is
+    m.mask(text, backstop=True)             # + regex safety net (EMAIL/URL/partial PHONE, long digit runs → [NUM])
     Masker.from_pretrained(mask_tokens={"PHONE": "***", "NAME": ""})   # per-type replacement text
     m.predict(text)                         # [Span(start, end, type, score)]
 """
@@ -20,8 +21,9 @@ from . import _koredact
 DEFAULT_REPO = "infobank-corp/koredact-bert-base-onnx"   # ONNX repo; the PyTorch weights live under the same name without -onnx
 BUNDLE_FILES = ["config.json", "tokenizer.json", "tokenizer_config.json", "onnx/model.onnx"]
 DECODER_VERSION: str = _koredact.DECODER_VERSION
-ENTITY_TYPES: tuple[str, ...] = tuple(_koredact.ENTITY_TYPES)
-DEFAULT_MASK_TOKENS: dict[str, str] = dict(_koredact.DEFAULT_MASK_TOKENS)   # {"PHONE": "[PHONE]", ...}
+ENTITY_TYPES: tuple[str, ...] = tuple(_koredact.ENTITY_TYPES)           # the 13 model types
+BACKSTOP_NUM_TYPE: str = _koredact.BACKSTOP_NUM_TYPE                     # "NUM": backstop-only catch-all for long digit runs
+DEFAULT_MASK_TOKENS: dict[str, str] = dict(_koredact.DEFAULT_MASK_TOKENS)   # {"PHONE": "[PHONE]", ..., "NUM": "[NUM]"}
 
 
 @dataclass(frozen=True)
@@ -66,21 +68,24 @@ class Masker:
     def mask_tokens(self) -> dict[str, str]:
         return self._inner.mask_tokens()
 
-    def predict(self, text: str, types: Iterable[str] | None = None) -> list[Span]:
-        """Decoded spans. `types` restricts to those entity types (see ENTITY_TYPES); unknown names raise ValueError."""
-        return [Span(*t) for t in self._inner.predict(text, _types(types))]
+    def predict(self, text: str, types: Iterable[str] | None = None, *, backstop: bool = False) -> list[Span]:
+        """Decoded spans. `backstop=True` adds the regex safety net (EMAIL, URL, partially masked PHONE, and
+        digit runs of 7+ digits as NUM) wherever the model found nothing, and keeps template variables
+        (`#{…}`, `{{…}}`, `${…}`) unmasked. `types` restricts to those entity types (ENTITY_TYPES plus "NUM");
+        unknown names raise ValueError."""
+        return [Span(*t) for t in self._inner.predict(text, _types(types), backstop)]
 
     def predict_raw(self, text: str) -> list[Span]:
         """Model output after window merge, before the decoder (for diagnostics)."""
         return [Span(*t) for t in self._inner.predict_raw(text)]
 
-    def mask(self, text: str, types: Iterable[str] | None = None) -> str:
-        """Masked text. `types` restricts masking to those entity types; the rest stays in clear text."""
-        return self._inner.mask(text, _types(types))
+    def mask(self, text: str, types: Iterable[str] | None = None, *, backstop: bool = False) -> str:
+        """Masked text. Same options as `predict`; `types` restricts masking, the rest stays in clear text."""
+        return self._inner.mask(text, _types(types), backstop)
 
 
 def _types(types: Iterable[str] | None) -> list[str] | None:
     return None if types is None else [str(t) for t in types]
 
 
-__all__ = ["Masker", "Span", "DEFAULT_REPO", "DECODER_VERSION", "ENTITY_TYPES", "DEFAULT_MASK_TOKENS"]
+__all__ = ["Masker", "Span", "DEFAULT_REPO", "DECODER_VERSION", "ENTITY_TYPES", "BACKSTOP_NUM_TYPE", "DEFAULT_MASK_TOKENS"]

@@ -1,4 +1,4 @@
-//! Decoder v3 — 1:1 port of the reference implementation `decode.py`. Order fixed by `apply`:
+//! Decoder v3 — 1:1 port of the reference Python decoder (shared contract: `tests/fixtures/decoder_vectors.json`). Order fixed by `apply`:
 //! particle strip → RRN/FRN 7th-digit relabel → fragment drop. Verified against
 //! `tests/fixtures/decoder_vectors.json` (shared with the Python reference).
 use crate::types::{EntityType, Span};

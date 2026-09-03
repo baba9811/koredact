@@ -1,4 +1,4 @@
-//! Parity with the Python reference backend (the reference implementation `HfTokenClassifierBackend` + `decode.apply`).
+//! Parity with the Python reference backend (HF token-classification pipeline + the reference decoder).
 //! Needs a real bundle and a reference dump → runs only when both env vars are set:
 //!   KOREDACT_BUNDLE=<dir with onnx/model.onnx> KOREDACT_REF=<jsonl: {text, decoded:[[s,e,type,score]], raw:[...]}>
 //!   ORT_DYLIB_PATH=<libonnxruntime> cargo test --no-default-features --features load-dynamic --test parity_reference -- --ignored

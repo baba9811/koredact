@@ -25,6 +25,28 @@ Masker.from_pretrained(mask_tokens={"PHONE": "***", "NAME": ""})   # per-type re
 13 entity types: `NAME PHONE EMAIL RRN FRN BRN CARD ACCOUNT ADDRESS DRIVER_LICENSE PASSPORT URL CODE`
 (`koredact.ENTITY_TYPES`). Defaults and versions: `koredact.DEFAULT_MASK_TOKENS`, `koredact.DECODER_VERSION`.
 
+### Backstop (opt-in)
+
+`backstop=True` layers a deterministic regex safety net over the model output for production masking,
+where a miss costs more than an over-mask:
+
+- adds `EMAIL`, `URL` and partially masked mobile numbers (`010-****-1234`) the model did not label;
+- marks any remaining run of 7+ digits (separators `-`, `.`, space allowed) as `NUM`, a catch-all with no
+  type judgement: missed phone or account numbers, but also order or tracking numbers. Rendered as `[NUM]`
+  (`mask_tokens={"NUM": ...}` to change it). `NUM` never comes from the model alone;
+- keeps template variables (`#{name}`, `{{code}}`, `${url}`) unmasked.
+
+Regex spans score below every confident model span, so where both fire the model's type wins. The default
+(`backstop=False`) is the pure model + decoder contract used for the published evaluation numbers.
+
+```python
+m.mask("링크 https://example.test/a 주문 12345678 #{이름}님", backstop=True)
+# '링크 [URL] 주문 [NUM] #{이름}님'
+```
+
+Overlapping spans of different types never leave text exposed: the higher-scoring span wins the shared
+characters and the other keeps its remainder.
+
 ## Development
 
 ```sh

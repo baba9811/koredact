@@ -75,11 +75,11 @@ impl PyMasker {
 
     /// [(start, end, type, score)] after the decoder. Inference runs with the GIL released; `&mut self`
     /// serializes calls on one Masker (ORT intra-op threads parallelize inside a call).
-    #[pyo3(signature = (text, types=None))]
-    fn predict(&mut self, py: Python<'_>, text: String, types: Option<Vec<String>>) -> PyResult<Vec<(usize, usize, String, f32)>> {
+    #[pyo3(signature = (text, types=None, backstop=false))]
+    fn predict(&mut self, py: Python<'_>, text: String, types: Option<Vec<String>>, backstop: bool) -> PyResult<Vec<(usize, usize, String, f32)>> {
         let keep = parse_types(types)?;
         let inner = &mut self.inner;
-        let spans = py.detach(move || match keep { Some(k) => inner.predict_types(&text, &k), None => inner.predict(&text) }).map_err(err)?;
+        let spans = py.detach(move || inner.predict_opts(&text, keep.as_deref(), backstop)).map_err(err)?;
         Ok(spans.into_iter().map(|s| (s.start, s.end, s.entity.as_str().to_string(), s.score)).collect())
     }
 
@@ -90,11 +90,11 @@ impl PyMasker {
         Ok(spans.into_iter().map(|s| (s.start, s.end, s.entity.as_str().to_string(), s.score)).collect())
     }
 
-    #[pyo3(signature = (text, types=None))]
-    fn mask(&mut self, py: Python<'_>, text: String, types: Option<Vec<String>>) -> PyResult<String> {
+    #[pyo3(signature = (text, types=None, backstop=false))]
+    fn mask(&mut self, py: Python<'_>, text: String, types: Option<Vec<String>>, backstop: bool) -> PyResult<String> {
         let keep = parse_types(types)?;
         let inner = &mut self.inner;
-        py.detach(move || match keep { Some(k) => inner.mask_types(&text, &k), None => inner.mask(&text) }).map_err(err)
+        py.detach(move || inner.mask_opts(&text, keep.as_deref(), backstop)).map_err(err)
     }
 }
 
@@ -102,7 +102,8 @@ impl PyMasker {
 fn _koredact(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyMasker>()?;
     m.add("DECODER_VERSION", crate::DECODER_VERSION)?;
-    m.add("ENTITY_TYPES", EntityType::ALL.map(|t| t.as_str()).to_vec())?;
+    m.add("ENTITY_TYPES", EntityType::TRAINED.map(|t| t.as_str()).to_vec())?;   // model types; NUM is backstop-only
+    m.add("BACKSTOP_NUM_TYPE", EntityType::Num.as_str())?;
     let defaults = MaskTokens::default();
     m.add("DEFAULT_MASK_TOKENS", EntityType::ALL.iter().map(|t| (t.as_str(), defaults.get(*t).to_string())).collect::<HashMap<_, _>>())?;
     Ok(())

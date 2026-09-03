@@ -28,6 +28,14 @@ except ValueError:
     pass
 else:
     raise AssertionError("unknown mask_tokens type should raise ValueError")
+assert koredact.BACKSTOP_NUM_TYPE == "NUM" and "NUM" not in koredact.ENTITY_TYPES and koredact.DEFAULT_MASK_TOKENS["NUM"] == "[NUM]"
+bs_text = "문의 a@b.com 010-****-1234 주문번호 12345678 #{이름}님"
+bs = m.predict(bs_text, backstop=True)
+assert {s.type for s in bs} >= {"EMAIL", "PHONE"}, bs          # regex spans present even with random model weights
+assert all(not (s.start < bs_text.index("#{") + 5 and s.end > bs_text.index("#{")) for s in bs), bs   # template variable protected
+assert "#{이름}" in m.mask(bs_text, backstop=True) and "a@b.com" not in m.mask(bs_text, backstop=True)
+assert {s.type for s in m.predict(bs_text, types=["NUM"], backstop=True)} <= {"NUM"}
+assert m.predict(bs_text, types=["NUM"]) == []                  # NUM never comes from the model alone
 for bad in (["PHONE", "SSN"], []):
     try:
         m.mask(text, types=bad)

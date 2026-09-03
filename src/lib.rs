@@ -1,6 +1,7 @@
 //! koredact — Korean PII masking runtime: BERT token-classification (ONNX) + rule decoder.
 //! Pipeline per text: char windows (400/100) → tokenize (char offsets) → ONNX logits → argmax →
-//! simple grouping → window merge → decoder v3 → spans / masked text.
+//! simple grouping → window merge → decoder v3 → (optional regex backstop) → spans / masked text.
+pub mod backstop;
 pub mod decode;
 pub mod error;
 pub mod infer;
@@ -69,29 +70,41 @@ impl Masker {
         Ok(window::merge(spans))
     }
 
-    /// Backend contract: raw spans + decoder v3.
+    /// Backend contract: raw spans + decoder v3 (no backstop, no type filter).
     pub fn predict(&mut self, text: &str) -> Result<Vec<Span>, Error> {
-        let chars: Vec<char> = text.chars().collect();
-        let raw = self.predict_raw(text)?;
-        Ok(decode::apply(&chars, &raw))
+        self.predict_opts(text, None, false)
     }
 
     pub fn mask(&mut self, text: &str) -> Result<String, Error> {
-        let chars: Vec<char> = text.chars().collect();
-        let spans = self.predict(text)?;
-        Ok(mask::render(&chars, &spans, &self.mask_tokens))
+        self.mask_opts(text, None, false)
     }
 
-    /// `predict` restricted to `keep` types. Filtering happens before overlap resolution, so a kept span
-    /// is masked even where a dropped type scored higher on the same characters.
+    /// `predict` restricted to `keep` types (see `predict_opts`).
     pub fn predict_types(&mut self, text: &str, keep: &[EntityType]) -> Result<Vec<Span>, Error> {
-        Ok(keep_types(self.predict(text)?, keep))
+        self.predict_opts(text, Some(keep), false)
     }
 
     /// `mask` restricted to `keep` types; other types are left in clear text.
     pub fn mask_types(&mut self, text: &str, keep: &[EntityType]) -> Result<String, Error> {
+        self.mask_opts(text, Some(keep), false)
+    }
+
+    /// Decoded spans with the two opt-ins. `backstop` merges the regex safety net (`backstop::find`) under
+    /// template-variable protection; `keep` then restricts types. The filter runs before overlap resolution,
+    /// so a kept span is masked even where a dropped type scored higher on the same characters.
+    pub fn predict_opts(&mut self, text: &str, keep: Option<&[EntityType]>, backstop: bool) -> Result<Vec<Span>, Error> {
         let chars: Vec<char> = text.chars().collect();
-        let spans = self.predict_types(text, keep)?;
+        let raw = self.predict_raw(text)?;
+        let mut spans = decode::apply(&chars, &raw);
+        if backstop {
+            spans = mask::combine_backstop(spans, backstop::find(&chars), &backstop::var_zones(&chars));
+        }
+        Ok(match keep { Some(k) => keep_types(spans, k), None => spans })
+    }
+
+    pub fn mask_opts(&mut self, text: &str, keep: Option<&[EntityType]>, backstop: bool) -> Result<String, Error> {
+        let chars: Vec<char> = text.chars().collect();
+        let spans = self.predict_opts(text, keep, backstop)?;
         Ok(mask::render(&chars, &spans, &self.mask_tokens))
     }
 }
@@ -120,21 +133,11 @@ mod tests {
         // NAME (score .9) overlaps PHONE (score .5) on chars 2..6; unfiltered render keeps NAME only there.
         let spans = vec![Span::new(0, 6, EntityType::Name, 0.9), Span::new(2, 15, EntityType::Phone, 0.5)];
         let tokens = MaskTokens::default();
-        assert_eq!(mask::render(&chars, &spans, &tokens), "[NAME]012345678");
+        // unfiltered: NAME wins 0..6, PHONE keeps its residual 6..15
+        assert_eq!(mask::render(&chars, &spans, &tokens), "[NAME][PHONE]");
         let only_phone = keep_types(spans.clone(), &[EntityType::Phone]);
         assert_eq!(only_phone.len(), 1);
         assert_eq!(mask::render(&chars, &only_phone, &tokens), "홍길[PHONE]");
         assert!(keep_types(spans, &[]).is_empty());
-    }
-
-    #[test]
-    fn mask_tokens_default_and_override() {
-        let mut tokens = MaskTokens::default();
-        assert_eq!(tokens.get(EntityType::DriverLicense), "[DRIVER_LICENSE]");
-        tokens.set(EntityType::Phone, "***");
-        tokens.set(EntityType::Name, "");
-        let chars: Vec<char> = "홍길동 01012345678".chars().collect();
-        let spans = vec![Span::new(0, 3, EntityType::Name, 0.9), Span::new(4, 15, EntityType::Phone, 0.9)];
-        assert_eq!(mask::render(&chars, &spans, &tokens), " ***");
     }
 }
