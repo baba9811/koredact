@@ -6,7 +6,6 @@ use crate::error::Error;
 
 pub struct Tok {
     inner: Tokenizer,
-    pub max_length: usize,
 }
 
 impl Tok {
@@ -17,7 +16,7 @@ impl Tok {
         inner.with_truncation(Some(TruncationParams {
             max_length, strategy: TruncationStrategy::LongestFirst, stride: 0, direction: TruncationDirection::Right,
         })).map_err(|e| Error::Tokenizer(e.to_string()))?;
-        Ok(Tok { inner, max_length })
+        Ok(Tok { inner })
     }
 
     pub fn encode(&self, text: &str) -> Result<Encoding, Error> {
