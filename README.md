@@ -1,5 +1,7 @@
 # koredact
 
+[![PyPI](https://img.shields.io/pypi/v/koredact)](https://pypi.org/project/koredact/) [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://pypi.org/project/koredact/) [![wheels](https://github.com/baba9811/koredact/actions/workflows/wheels.yml/badge.svg)](https://github.com/baba9811/koredact/actions/workflows/wheels.yml) [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE) [![HF model](https://img.shields.io/badge/%F0%9F%A4%97%20HF-koredact--bert--base--onnx-yellow)](https://huggingface.co/infobank-corp/koredact-bert-base-onnx)
+
 Korean PII masking runtime: BERT token-classification (ONNX, `infobank-corp/koredact-bert-base-onnx`, exported from `infobank-corp/koredact-bert-base`) + rule decoder, Rust core with Python bindings.
 
 ## Install
