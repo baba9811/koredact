@@ -32,8 +32,6 @@ impl Model {
         Ok(Model { session, n_labels, wants_type_ids })
     }
 
-    pub fn n_labels(&self) -> usize { self.n_labels }
-
     /// Returns per-token logits rows (seq × n_labels).
     pub fn logits(&mut self, ids: &[u32], type_ids: &[u32], mask: &[u32]) -> Result<Vec<Vec<f32>>, Error> {
         if ids.is_empty() || mask.len() != ids.len() || (self.wants_type_ids && type_ids.len() != ids.len()) {

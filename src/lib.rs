@@ -1,15 +1,15 @@
 //! koredact — Korean PII masking runtime: BERT token-classification (ONNX) + rule decoder.
 //! Pipeline per text: char windows (400/100) → tokenize (char offsets) → ONNX logits → argmax →
 //! simple grouping → window merge → decoder v3 → (optional regex backstop) → spans / masked text.
-pub mod backstop;
-pub mod decode;
 pub mod error;
-pub mod infer;
-pub mod label;
-pub mod mask;
-pub mod tokenize;
 pub mod types;
-pub mod window;
+
+mod model;
+mod rules;
+
+// 디코더 버전·벡터는 배포 계약 — 경로를 내부 묶음(`rules`)에 묶지 않고 크레이트 최상위로 재노출
+pub use rules::decode;
+
 #[cfg(feature = "python")]
 mod py;
 
@@ -19,14 +19,14 @@ use serde::Deserialize;
 
 pub use decode::DECODER_VERSION;
 pub use error::Error;
-pub use mask::MaskTokens;
+pub use rules::mask::MaskTokens;
 pub use types::{EntityType, Span};
 
 #[derive(Deserialize)]
 struct TokConfig { #[serde(default = "default_max_len")] model_max_length: usize }
 fn default_max_len() -> usize { 512 }
 
-pub struct Masker { tok: tokenize::Tok, labels: label::Labels, model: infer::Model, mask_tokens: MaskTokens }
+pub struct Masker { tok: model::tokenize::Tok, labels: model::label::Labels, model: model::infer::Model, mask_tokens: MaskTokens }
 
 impl Masker {
     /// Load a published bundle dir: `config.json`, `tokenizer.json`, `tokenizer_config.json`, `onnx/model.onnx`.
@@ -36,9 +36,9 @@ impl Masker {
             if !dir.join(n).is_file() { return Err(Error::Bundle(format!("missing {n} in {}", dir.display()))); }
         }
         let tc: TokConfig = serde_json::from_slice(&std::fs::read(dir.join("tokenizer_config.json"))?)?;
-        let labels = label::Labels::load(&dir.join("config.json"))?;
-        let model = infer::Model::load(&dir.join("onnx/model.onnx"), labels.0.len(), threads)?;
-        let tok = tokenize::Tok::load(&dir.join("tokenizer.json"), tc.model_max_length)?;
+        let labels = model::label::Labels::load(&dir.join("config.json"))?;
+        let model = model::infer::Model::load(&dir.join("onnx/model.onnx"), labels.0.len(), threads)?;
+        let tok = model::tokenize::Tok::load(&dir.join("tokenizer.json"), tc.model_max_length)?;
         Ok(Masker { tok, labels, model, mask_tokens: MaskTokens::default() })
     }
 
@@ -49,8 +49,8 @@ impl Masker {
     pub fn predict_raw(&mut self, text: &str) -> Result<Vec<Span>, Error> {
         let chars: Vec<char> = text.chars().collect();
         let mut spans = Vec::new();
-        for off in window::starts(chars.len()) {
-            let end = (off + window::MAX_CHARS).min(chars.len());
+        for off in model::window::starts(chars.len()) {
+            let end = (off + model::window::MAX_CHARS).min(chars.len());
             let chunk: String = chars[off..end].iter().collect();
             let enc = self.tok.encode(&chunk)?;
             let rows = self.model.logits(enc.get_ids(), enc.get_type_ids(), enc.get_attention_mask())?;
@@ -59,15 +59,15 @@ impl Masker {
             }
             let special = enc.get_special_tokens_mask();
             let offsets = enc.get_offsets();
-            let toks: Vec<label::TokenPred> = rows.iter().enumerate()
+            let toks: Vec<model::label::TokenPred> = rows.iter().enumerate()
                 .filter(|(i, _)| special[*i] == 0)
                 .map(|(i, row)| {
                     let (label, score) = argmax_softmax(row);
-                    label::TokenPred { label, score, start: off + offsets[i].0, end: off + offsets[i].1 }
+                    model::label::TokenPred { label, score, start: off + offsets[i].0, end: off + offsets[i].1 }
                 }).collect();
-            spans.extend(label::group_simple(&self.labels, &toks));
+            spans.extend(model::label::group_simple(&self.labels, &toks));
         }
-        Ok(window::merge(spans))
+        Ok(model::window::merge(spans))
     }
 
     /// Backend contract: raw spans + decoder v3 (no backstop, no type filter).
@@ -89,7 +89,7 @@ impl Masker {
         self.mask_opts(text, Some(keep), false)
     }
 
-    /// Decoded spans with the two opt-ins. `backstop` merges the regex safety net (`backstop::find`) under
+    /// Decoded spans with the two opt-ins. `backstop` merges the regex safety net (`rules::backstop::find`) under
     /// template-variable protection; `keep` then restricts types. The filter runs before overlap resolution,
     /// so a kept span is masked even where a dropped type scored higher on the same characters.
     pub fn predict_opts(&mut self, text: &str, keep: Option<&[EntityType]>, backstop: bool) -> Result<Vec<Span>, Error> {
@@ -97,16 +97,16 @@ impl Masker {
         let raw = self.predict_raw(text)?;
         let filter = |spans: Vec<Span>| match keep { Some(k) => keep_types(spans, k), None => spans };
         // filter each source before merging: a dropped model span must not clip (and then abandon) a kept span
-        let spans = filter(decode::apply(&chars, &raw));
+        let spans = filter(rules::decode::apply(&chars, &raw));
         if !backstop { return Ok(spans); }
-        let back = filter(backstop::find(&chars));
-        Ok(mask::combine_backstop(spans, back, &backstop::var_zones(&chars)))
+        let back = filter(rules::backstop::find(&chars));
+        Ok(rules::mask::combine_backstop(spans, back, &rules::backstop::var_zones(&chars)))
     }
 
     pub fn mask_opts(&mut self, text: &str, keep: Option<&[EntityType]>, backstop: bool) -> Result<String, Error> {
         let chars: Vec<char> = text.chars().collect();
         let spans = self.predict_opts(text, keep, backstop)?;
-        Ok(mask::render(&chars, &spans, &self.mask_tokens))
+        Ok(rules::mask::render(&chars, &spans, &self.mask_tokens))
     }
 }
 
@@ -118,9 +118,9 @@ fn argmax_softmax(row: &[f32]) -> (usize, f32) {
     (best, 1.0 / denom)
 }
 
-/// Drop spans whose type is not in `keep`. Runs on decoded spans, i.e. before `mask::resolve_overlaps`,
+/// Drop spans whose type is not in `keep`. Runs on decoded spans, i.e. before `rules::mask::resolve_overlaps`,
 /// so restricting to a type can never lose one of its spans to a higher-scoring span of another type.
-pub fn keep_types(spans: Vec<Span>, keep: &[EntityType]) -> Vec<Span> {
+fn keep_types(spans: Vec<Span>, keep: &[EntityType]) -> Vec<Span> {
     spans.into_iter().filter(|s| keep.contains(&s.entity)).collect()
 }
 
@@ -133,8 +133,8 @@ mod tests {
         // model NAME 0..11 covers the digit run; with keep=[NUM] the NAME must not clip the NUM away
         let chars: Vec<char> = "01012345678".chars().collect();
         let ner = keep_types(vec![Span::new(0, 11, EntityType::Name, 0.9)], &[EntityType::Num]);
-        let back = keep_types(backstop::find(&chars), &[EntityType::Num]);
-        let out = mask::combine_backstop(ner, back, &[]);
+        let back = keep_types(rules::backstop::find(&chars), &[EntityType::Num]);
+        let out = rules::mask::combine_backstop(ner, back, &[]);
         assert_eq!(out.iter().map(|s| (s.start, s.end, s.entity)).collect::<Vec<_>>(), [(0, 11, EntityType::Num)]);
     }
 
@@ -145,10 +145,10 @@ mod tests {
         let spans = vec![Span::new(0, 6, EntityType::Name, 0.9), Span::new(2, 15, EntityType::Phone, 0.5)];
         let tokens = MaskTokens::default();
         // unfiltered: NAME wins 0..6, PHONE keeps its residual 6..15
-        assert_eq!(mask::render(&chars, &spans, &tokens), "[NAME][PHONE]");
+        assert_eq!(rules::mask::render(&chars, &spans, &tokens), "[NAME][PHONE]");
         let only_phone = keep_types(spans.clone(), &[EntityType::Phone]);
         assert_eq!(only_phone.len(), 1);
-        assert_eq!(mask::render(&chars, &only_phone, &tokens), "홍길[PHONE]");
+        assert_eq!(rules::mask::render(&chars, &only_phone, &tokens), "홍길[PHONE]");
         assert!(keep_types(spans, &[]).is_empty());
     }
 }
