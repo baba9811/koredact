@@ -44,3 +44,5 @@ for bad in (["PHONE", "SSN"], []):
     else:
         raise AssertionError(f"types={bad} should raise ValueError")
 print(f"ok · windows exercised · raw {len(raw)} · decoded {len(spans)}")
+import runpy
+runpy.run_path(str(Path(__file__).with_name("runtime_options.py")))

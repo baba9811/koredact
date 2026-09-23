@@ -109,6 +109,14 @@ uv venv && uv pip install maturin && source .venv/bin/activate && maturin develo
 .venv/bin/python tests/python/runtime_options.py
 ```
 
+Python smoke는 런타임 옵션 검사도 호출하므로 기존 CI 진입점에서 함께 실행된다.
+NaN/무한대 등 네이티브 실패 복구 검사는 설치된 ORT 라이브러리를 지정해 실행한다.
+
+```sh
+ORT_DYLIB_PATH="$(.venv/bin/python -c 'from koredact import _onnxruntime_dylib; print(_onnxruntime_dylib())')" \
+  cargo test --locked --no-default-features --features load-dynamic failed_accelerator_run -- --ignored
+```
+
 구조·의존 방향·릴리스 규칙은 [AGENTS.md](https://github.com/baba9811/koredact/blob/main/AGENTS.md).
 
 라이선스: 이 라이브러리는 Apache-2.0. 모델 가중치는 CC-BY-SA-4.0(모델 카드 참조).
