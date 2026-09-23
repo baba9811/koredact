@@ -29,6 +29,56 @@ Masker.from_pretrained(mask_tokens={"PHONE": "***", "NAME": ""})   # 유형별 �
 13 유형: `NAME PHONE EMAIL RRN FRN BRN CARD ACCOUNT ADDRESS DRIVER_LICENSE PASSPORT URL CODE`
 (`koredact.ENTITY_TYPES`). 기본값·버전은 `koredact.DEFAULT_MASK_TOKENS`, `koredact.DECODER_VERSION`.
 
+### 장치 선택과 배치 처리
+
+```python
+m = Masker.from_pretrained(device="auto", threads=1)   # 기존 인자 생략 호출도 유지
+print(m.device, m.fallback_reason)                   # 선택한 제공자와 대체 사유
+masked = m.mask_many(["문의 010-1234-5678", "주문 12345678"], workers=2, backstop=True)
+spans = m.predict_many(["홍길동", "a@example.test"], workers=2)
+```
+
+`auto`는 사용 가능한 GPU(CUDA/ROCm/DirectML/OpenVINO), NPU(QNN/OpenVINO/DirectML),
+CoreML 순으로 세션을 시도하고 마지막에 CPU를 사용한다. `cpu`, `gpu`, `npu` 또는
+`cuda`, `rocm`, `directml`, `openvino_gpu`, `qnn`, `openvino_npu`, `directml_npu`,
+`coreml`로 범위를 지정할 수 있다. `metal`/`mps`/`coreml_gpu`는 CoreML의 CPU+GPU 경로,
+`coreml_npu`는 CPU+Neural Engine 경로다. 직접 Metal 실행 제공자는 아니다.
+
+가속기 등록·모델 초기화·복구 가능한 추론 오류는 CPU로 대체한다. CPU도 실패하거나
+입력/옵션/모델 자체가 잘못됐으면 오류를 전달하며 원문을 성공 결과로 돌려주지 않는다.
+`device`는 단일 문장 세션에 등록된 제공자이며, 일부 연산의 CPU 실행 가능성까지 배제하지
+않는다. 배치 워커도 각 세션에서 독립적으로 대체할 수 있다.
+
+기본 설치는 CPU ONNX Runtime을 포함한다. GPU/NPU는 해당 제공자를 포함한 ONNX Runtime과
+호환 드라이버·SDK가 있어야 한다. `ort_dylib`로 별도 런타임 라이브러리를 지정할 수도 있다.
+CPU/GPU Python 런타임 배포판은 같은 `onnxruntime` 모듈을 쓰므로 같은 환경에 겹쳐 설치하지
+않는다. GPU 런타임을 관리하는 환경에서는 기본 의존성의 CPU 런타임 재설치 여부도 확인한다.
+CUDA/cuDNN 버전을 맞추고 필요하면 `onnxruntime.preload_dlls()`로 라이브러리를 먼저 적재한다.
+NPU는 모델의 연산·입력 형태·정밀도 조건도 만족해야 한다. 모델을 자동 양자화하지 않는다.
+
+CUDA 13 환경의 별도 GPU 설치 예시:
+
+```sh
+uv venv .venv-gpu
+uv pip install --python .venv-gpu/bin/python 'onnxruntime-gpu[cuda,cudnn]==1.29.0' 'huggingface_hub>=0.30'
+uv pip install --python .venv-gpu/bin/python --no-deps 'koredact==0.4.0'
+```
+
+GPU 배포판은 Python 모듈은 같지만 패키지 이름이 다르다. 기본 CPU 의존성을 다시
+해결하는 `uv sync`/일반 재설치는 CPU 런타임을 추가할 수 있으므로 위 환경은 별도로 관리한다.
+
+`threads`는 한 세션의 intra-op 스레드 수(기존 기본 1), `workers`는 배치 동시 처리 수
+(기본 1)다. 결과는 입력 순서이며 기존 `types`, `backstop`, `mask_tokens`가 그대로 적용된다.
+워커 수는 입력 수 이하로 제한하고, 추가 세션이나 스레드를 만들 수 없으면 적은 워커로
+처리한다. 워커마다 모델 메모리가 추가되므로 1부터 측정해 늘린다. 추가 세션은 배치 호출
+동안만 유지된다. CPU 재현성을 고정하려면 `device="cpu"`를 사용한다.
+
+Rust의 기존 `Masker::from_dir(dir, threads)`도 유지한다. 장치를 지정하려면
+`Masker::from_dir_with_device(dir, threads, "cpu")`를 사용한다. 가속기 등록은
+`load-dynamic` 빌드에서 지원하고 기본 정적 CPU 빌드는 CPU로 대체한다.
+
+공식 근거와 검증 범위: [런타임 설계 기록](docs/research/2026-09-23-runtime-options.md).
+
 ### 백스톱 (opt-in)
 
 `backstop=True` 는 모델 출력 위에 결정적 정규식 안전망을 덧댐(놓침이 과마스킹보다 비싼 운영 마스킹용).
@@ -56,6 +106,7 @@ m.mask("링크 https://example.test/a 주문 12345678 #{이름}님", backstop=Tr
 cargo test --release --no-default-features --features load-dynamic
 uv venv && uv pip install maturin && source .venv/bin/activate && maturin develop --release
 .venv/bin/python tests/python/smoke_tiny_bundle.py
+.venv/bin/python tests/python/runtime_options.py
 ```
 
 구조·의존 방향·릴리스 규칙은 [AGENTS.md](https://github.com/baba9811/koredact/blob/main/AGENTS.md).

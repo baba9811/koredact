@@ -49,20 +49,40 @@ def _onnxruntime_dylib() -> str:
 
 class Masker:
     def __init__(self, bundle_dir: str | os.PathLike, *, threads: int = 1, ort_dylib: str | None = None,
-                 mask_tokens: Mapping[str, str] | None = None):
+                 mask_tokens: Mapping[str, str] | None = None, device: str = "auto"):
         """`mask_tokens` overrides the replacement text per type (default `[TYPE]`); unknown types raise ValueError."""
         self._inner = _koredact.Masker(str(bundle_dir), ort_dylib or _onnxruntime_dylib(), threads,
-                                       None if mask_tokens is None else {str(k): str(v) for k, v in mask_tokens.items()})
+                                       None if mask_tokens is None else {str(k): str(v) for k, v in mask_tokens.items()}, device=device)
 
     @classmethod
     def from_pretrained(cls, repo_id: str = DEFAULT_REPO, *, revision: str | None = None, threads: int = 1,
-                        mask_tokens: Mapping[str, str] | None = None) -> "Masker":
+                        mask_tokens: Mapping[str, str] | None = None, device: str = "auto",
+                        ort_dylib: str | None = None) -> "Masker":
         """Download (cached) the bundle from the Hub, or accept a local directory path."""
         if Path(repo_id).is_dir():
-            return cls(repo_id, threads=threads, mask_tokens=mask_tokens)
+            return cls(repo_id, threads=threads, mask_tokens=mask_tokens, device=device, ort_dylib=ort_dylib)
         from huggingface_hub import snapshot_download
         local = snapshot_download(repo_id, revision=revision, allow_patterns=BUNDLE_FILES)
-        return cls(local, threads=threads, mask_tokens=mask_tokens)
+        return cls(local, threads=threads, mask_tokens=mask_tokens, device=device, ort_dylib=ort_dylib)
+
+    @property
+    def device(self) -> str:
+        """Selected provider for the single-text session; individual operators may run on CPU."""
+        return self._inner.device
+
+    @property
+    def fallback_reason(self) -> str | None:
+        return self._inner.fallback_reason
+
+    def predict_many(self, texts: Iterable[str], types: Iterable[str] | None = None, *,
+                     backstop: bool = False, workers: int = 1) -> list[list[Span]]:
+        """Ordered batch; each worker has an independent model session. Default: one worker."""
+        return [[Span(*span) for span in spans] for spans in self._inner.predict_many(list(texts), _types(types), backstop, workers=workers)]
+
+    def mask_many(self, texts: Iterable[str], types: Iterable[str] | None = None, *,
+                  backstop: bool = False, workers: int = 1) -> list[str]:
+        """Ordered batch with the same masking policy as mask(); memory grows with workers."""
+        return self._inner.mask_many(list(texts), _types(types), backstop, workers=workers)
 
     @property
     def mask_tokens(self) -> dict[str, str]:
