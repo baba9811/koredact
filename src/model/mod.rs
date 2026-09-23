@@ -4,3 +4,5 @@ pub(crate) mod infer;
 pub(crate) mod label;
 pub(crate) mod tokenize;
 pub(crate) mod window;
+
+pub(crate) mod device;

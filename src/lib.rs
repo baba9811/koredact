@@ -13,7 +13,7 @@ pub use rules::decode;
 #[cfg(feature = "python")]
 mod py;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -26,20 +26,81 @@ pub use types::{EntityType, Span};
 struct TokConfig { #[serde(default = "default_max_len")] model_max_length: usize }
 fn default_max_len() -> usize { 512 }
 
-pub struct Masker { tok: model::tokenize::Tok, labels: model::label::Labels, model: model::infer::Model, mask_tokens: MaskTokens }
+pub struct Masker { tok: model::tokenize::Tok, labels: model::label::Labels, model: model::infer::Model, mask_tokens: MaskTokens, dir: PathBuf, threads: usize, preference: String }
 
 impl Masker {
     /// Load a published bundle dir: `config.json`, `tokenizer.json`, `tokenizer_config.json`, `onnx/model.onnx`.
     pub fn from_dir(dir: &Path, threads: usize) -> Result<Masker, Error> {
+        Self::from_dir_with_device(dir, threads, "auto")
+    }
+
+    /// Prefer an accelerator when available; recoverable accelerator errors fall back to CPU.
+    pub fn from_dir_with_device(dir: &Path, threads: usize, device: &str) -> Result<Masker, Error> {
+        model::device::choices(device)?;
+        let dir = dir.canonicalize()?;
         let need = ["config.json", "tokenizer.json", "tokenizer_config.json", "onnx/model.onnx"];
         for n in need {
             if !dir.join(n).is_file() { return Err(Error::Bundle(format!("missing {n} in {}", dir.display()))); }
         }
         let tc: TokConfig = serde_json::from_slice(&std::fs::read(dir.join("tokenizer_config.json"))?)?;
         let labels = model::label::Labels::load(&dir.join("config.json"))?;
-        let model = model::infer::Model::load(&dir.join("onnx/model.onnx"), labels.0.len(), threads)?;
+        let model = model::infer::Model::load(&dir.join("onnx/model.onnx"), labels.0.len(), threads, device)?;
         let tok = model::tokenize::Tok::load(&dir.join("tokenizer.json"), tc.model_max_length)?;
-        Ok(Masker { tok, labels, model, mask_tokens: MaskTokens::default() })
+        Ok(Masker { tok, labels, model, mask_tokens: MaskTokens::default(), dir, threads, preference: device.to_owned() })
+    }
+
+    /// Selected provider for the single-text session; unsupported graph operators may still run on CPU.
+    pub fn device(&self) -> &'static str { self.model.device() }
+    pub fn fallback_reason(&self) -> Option<&str> { self.model.fallback_reason() }
+
+    /// Ordered batch. Each worker owns a session; `workers` is an upper bound, not a CPU-core autodetection setting.
+    pub fn predict_many(&mut self, texts: &[String], workers: usize, keep: Option<&[EntityType]>, backstop: bool) -> Result<Vec<Vec<Span>>, Error> {
+        self.map_many(texts, workers, |masker, text| masker.predict_opts(text, keep, backstop))
+    }
+
+    pub fn mask_many(&mut self, texts: &[String], workers: usize, keep: Option<&[EntityType]>, backstop: bool) -> Result<Vec<String>, Error> {
+        self.map_many(texts, workers, |masker, text| masker.mask_opts(text, keep, backstop))
+    }
+
+    fn map_many<T: Send>(&mut self, texts: &[String], workers: usize, operation: impl Fn(&mut Self, &str) -> Result<T, Error> + Sync) -> Result<Vec<T>, Error> {
+        if workers == 0 { return Err(Error::Bundle("workers must be >= 1".into())); }
+        if texts.is_empty() { return Ok(Vec::new()); }
+        // ponytail: 배치 호출마다 추가 세션 적재, 반복 초기화 비용이 병목이면 재사용 풀 도입
+        let mut replicas = Vec::new();
+        for _ in 1..workers.min(texts.len()) {
+            match Self::from_dir_with_device(&self.dir, self.threads, &self.preference) {
+                Ok(mut replica) => { replica.mask_tokens = self.mask_tokens.clone(); replicas.push(replica); }
+                // 병렬 처리용 세션 적재 실패 시 이미 적재한 세션으로 계속 처리
+                Err(_) => break,
+            }
+        }
+        if replicas.is_empty() { return texts.iter().map(|text| operation(self, text)).collect(); }
+        let count = replicas.len() + 1;
+        let parallel = std::thread::scope(|scope| -> Result<Option<Vec<T>>, Error> {
+            let mut handles = Vec::new();
+            let operation = &operation;
+            let mut spawn_failed = false;
+            for (index, mut replica) in replicas.into_iter().enumerate() {
+                let part = &texts[texts.len() * (index + 1) / count..texts.len() * (index + 2) / count];
+                match std::thread::Builder::new().spawn_scoped(scope, move || part.iter().map(|text| operation(&mut replica, text)).collect::<Result<Vec<T>, Error>>()) {
+                    Ok(handle) => handles.push(handle),
+                    Err(_) => { spawn_failed = true; break; }
+                }
+            }
+            let first = if spawn_failed { Ok(Vec::new()) } else { texts[..texts.len() / count].iter().map(|text| operation(self, text)).collect() };
+            let mut rest = Vec::new();
+            for handle in handles {
+                rest.push(handle.join().map_err(|_| Error::Bundle("batch worker panicked".into())).and_then(|result| result));
+            }
+            if spawn_failed { return Ok(None); }
+            let mut output = first?;
+            for result in rest { output.extend(result?); }
+            Ok(Some(output))
+        })?;
+        match parallel {
+            Some(output) => Ok(output),
+            None => texts.iter().map(|text| operation(self, text)).collect(),
+        }
     }
 
     pub fn mask_tokens(&self) -> &MaskTokens { &self.mask_tokens }
@@ -54,9 +115,6 @@ impl Masker {
             let chunk: String = chars[off..end].iter().collect();
             let enc = self.tok.encode(&chunk)?;
             let rows = self.model.logits(enc.get_ids(), enc.get_type_ids(), enc.get_attention_mask())?;
-            if rows.iter().any(|r| r.is_empty() || r.iter().any(|v| !v.is_finite())) {
-                return Err(Error::Bundle("non-finite or empty logits row".into()));
-            }
             let special = enc.get_special_tokens_mask();
             let offsets = enc.get_offsets();
             let toks: Vec<model::label::TokenPred> = rows.iter().enumerate()

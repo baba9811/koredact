@@ -58,14 +58,37 @@ fn parse_types(types: Option<Vec<String>>) -> PyResult<Option<Vec<EntityType>>> 
 #[pymethods]
 impl PyMasker {
     #[new]
-    #[pyo3(signature = (dir, ort_dylib=None, threads=1, mask_tokens=None))]
-    fn new(dir: String, ort_dylib: Option<String>, threads: usize, mask_tokens: Option<HashMap<String, String>>) -> PyResult<Self> {
+    #[pyo3(signature = (dir, ort_dylib=None, threads=1, mask_tokens=None, *, device="auto"))]
+    fn new(dir: String, ort_dylib: Option<String>, threads: usize, mask_tokens: Option<HashMap<String, String>>, device: &str) -> PyResult<Self> {
         if threads == 0 { return Err(PyValueError::new_err("threads must be >= 1")); }
+        crate::model::device::choices(device).map_err(|e| PyValueError::new_err(e.to_string()))?;
         let tokens = parse_mask_tokens(mask_tokens)?;   // validate before the expensive model load
         if let Some(p) = ort_dylib { init_ort(&p)?; }   // load-dynamic: libonnxruntime from the `onnxruntime` wheel
-        let mut inner = Inner::from_dir(std::path::Path::new(&dir), threads).map_err(err)?;
+        let mut inner = Inner::from_dir_with_device(std::path::Path::new(&dir), threads, device).map_err(err)?;
         inner.set_mask_tokens(tokens);
         Ok(PyMasker { inner })
+    }
+
+    #[getter]
+    fn device(&self) -> &'static str { self.inner.device() }
+    #[getter]
+    fn fallback_reason(&self) -> Option<String> { self.inner.fallback_reason().map(str::to_owned) }
+
+    #[pyo3(signature = (texts, types=None, backstop=false, *, workers=1))]
+    fn predict_many(&mut self, py: Python<'_>, texts: Vec<String>, types: Option<Vec<String>>, backstop: bool, workers: usize) -> PyResult<Vec<Vec<(usize, usize, String, f32)>>> {
+        if workers == 0 { return Err(PyValueError::new_err("workers must be >= 1")); }
+        let keep = parse_types(types)?;
+        let inner = &mut self.inner;
+        let batches = py.detach(move || inner.predict_many(&texts, workers, keep.as_deref(), backstop)).map_err(err)?;
+        Ok(batches.into_iter().map(|spans| spans.into_iter().map(|s| (s.start, s.end, s.entity.as_str().to_string(), s.score)).collect()).collect())
+    }
+
+    #[pyo3(signature = (texts, types=None, backstop=false, *, workers=1))]
+    fn mask_many(&mut self, py: Python<'_>, texts: Vec<String>, types: Option<Vec<String>>, backstop: bool, workers: usize) -> PyResult<Vec<String>> {
+        if workers == 0 { return Err(PyValueError::new_err("workers must be >= 1")); }
+        let keep = parse_types(types)?;
+        let inner = &mut self.inner;
+        py.detach(move || inner.mask_many(&texts, workers, keep.as_deref(), backstop)).map_err(err)
     }
 
     /// Current replacement text per type, e.g. {"PHONE": "[PHONE]", ...}.
