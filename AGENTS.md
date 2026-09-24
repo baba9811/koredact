@@ -44,5 +44,8 @@
 
 ## Writing
 
+- Keep the README short: project purpose, installation, a minimal working example, and links to detailed documentation. Put extended API usage, accelerator setup, troubleshooting, and development or verification procedures under `docs/` instead of expanding the README.
+- Write the README and user guides in Korean telegraphic noun-ending style. Keep code, identifiers, and commands unchanged; write agent-facing documents such as `AGENTS.md` in English.
+- Use absolute public-repository links in the README so documentation and license links also work in the PyPI description.
 - Korean comments use the telegraphic noun-ending style. No Markdown emphasis, headings, or decorative bullets inside a comment; backticks around identifiers, flags, paths, and literal values are fine, and a leading warning mark for a real hazard is fine. English comments are left as they are.
 - A comment states the invariant that holds now and what breaks if it is violated, never how the code came to be.
