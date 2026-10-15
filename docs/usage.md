@@ -120,9 +120,11 @@ spans = masker.predict_many(["홍길동", "a@example.test"], workers=2)
 from koredact import DEFAULT_REPO, Masker
 
 masker = Masker.from_pretrained(
-    "/models/koredact-w8a8",       # 빠른 모델 번들: 로컬 경로 또는 Hub 저장소
-    fallback_repo=DEFAULT_REPO,    # 정밀 모델 번들(fp32)
-    fallback_margin=2.5,           # 재실행 기준 로짓 차
+    "infobank-corp/koredact-bert-base-onnx-int8",              # 빠른 모델 번들(동적 INT8)
+    revision="b70ea8d27646419e989e77406feb0d88a5a2046c",
+    fallback_repo=DEFAULT_REPO,                                 # 정밀 모델 번들(fp32)
+    fallback_revision="5f4f416a12a2b6bd06f999766cbd06fbacbd2cff",
+    fallback_margin=4.0,                                        # 재실행 기준 로짓 차
 )
 masker.mask("문의 010-1234-5678 홍길동")
 windows, rerun = masker.fallback_stats()   # 처리 창 수, 정밀 모델 재실행 창 수
@@ -142,6 +144,8 @@ windows, rerun = masker.fallback_stats()   # 처리 창 수, 정밀 모델 재�
 - 재실행하지 않은 창의 점수(`score`)는 빠른 모델 값. 정밀 모델과의 동일성 기준은 스팬 위치·유형.
 - 마진 선택: 배포 플랫폼·대표 데이터에서 두 모델의 최대 절대 로짓 차 ε 측정 후 `fallback_margin > 2ε`, 여유 포함.
   측정 ε는 미관측 입력의 상한 아님.
+
+- 게시 조합: [koredact-bert-base-onnx-int8](https://huggingface.co/infobank-corp/koredact-bert-base-onnx-int8) 리비전 `b70ea8d` + fp32 `5f4f416` + 마진 4.0. 회귀셋·확인셋 마스킹 게이트 통과 근거는 그 리포의 카드와 `quantize_record.json`. 다른 리비전·마진 조합은 근거 없음.
 
 근거·측정 결과: [캐스케이드 기록](research/2026-10-15-margin-cascade.md).
 
