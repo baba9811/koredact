@@ -76,12 +76,14 @@ class Masker:
 
     def predict_many(self, texts: Iterable[str], types: Iterable[str] | None = None, *,
                      backstop: bool = False, workers: int = 1) -> list[list[Span]]:
-        """Ordered batch; each worker has an independent model session. Default: one worker."""
+        """Ordered batch; each worker has its own model session, created on first use and reused while this
+        Masker lives. Default: one worker."""
         return [[Span(*span) for span in spans] for spans in self._inner.predict_many(list(texts), _types(types), backstop, workers=workers)]
 
     def mask_many(self, texts: Iterable[str], types: Iterable[str] | None = None, *,
                   backstop: bool = False, workers: int = 1) -> list[str]:
-        """Ordered batch with the same masking policy as mask(); memory grows with workers."""
+        """Ordered batch with the same masking policy as mask(); memory grows with the largest `workers` used
+        and is released with the Masker."""
         return self._inner.mask_many(list(texts), _types(types), backstop, workers=workers)
 
     @property
