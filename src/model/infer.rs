@@ -79,6 +79,13 @@ impl Model {
 }
 
 #[cfg(test)]
+impl Model {
+    pub(crate) fn session_inner(&self) -> std::sync::Arc<ort::session::SharedSessionInner> {
+        self.session.as_ref().expect("session loaded").inner()
+    }
+}
+
+#[cfg(test)]
 mod runtime_tests {
     use super::*;
     #[test]
