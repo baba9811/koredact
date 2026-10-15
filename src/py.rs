@@ -55,16 +55,34 @@ fn parse_types(types: Option<Vec<String>>) -> PyResult<Option<Vec<EntityType>>> 
         "unknown entity type {n:?}; valid: {}", EntityType::ALL.map(|t| t.as_str()).join(", "))))).collect::<PyResult<Vec<_>>>().map(Some)
 }
 
+/// Fallback bundle and margin are both-or-neither; the margin must be finite and > 0 as f32. ValueError otherwise.
+fn fallback_pair<T>(bundle: Option<T>, margin: Option<f32>) -> PyResult<Option<(T, f32)>> {
+    match (bundle, margin) {
+        (Some(bundle), Some(margin)) => Ok(Some((bundle, crate::model::cascade::check_margin(margin).map_err(|e| PyValueError::new_err(e.to_string()))?))),
+        (None, None) => Ok(None),
+        _ => Err(PyValueError::new_err("a fallback bundle (fallback_dir or fallback_repo) and fallback_margin must be given together")),
+    }
+}
+
+/// `Masker.from_pretrained` runs the constructor's fallback checks with this before downloading anything.
+#[pyfunction]
+fn check_fallback(given: bool, margin: Option<f32>) -> PyResult<()> {
+    fallback_pair(given.then_some(()), margin).map(|_| ())
+}
+
 #[pymethods]
 impl PyMasker {
     #[new]
-    #[pyo3(signature = (dir, ort_dylib=None, threads=1, mask_tokens=None, *, device="auto"))]
-    fn new(dir: String, ort_dylib: Option<String>, threads: usize, mask_tokens: Option<HashMap<String, String>>, device: &str) -> PyResult<Self> {
+    #[pyo3(signature = (dir, ort_dylib=None, threads=1, mask_tokens=None, *, device="auto", fallback_dir=None, fallback_margin=None))]
+    fn new(dir: String, ort_dylib: Option<String>, threads: usize, mask_tokens: Option<HashMap<String, String>>, device: &str,
+           fallback_dir: Option<String>, fallback_margin: Option<f32>) -> PyResult<Self> {
         if threads == 0 { return Err(PyValueError::new_err("threads must be >= 1")); }
         crate::model::device::choices(device).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let fallback = fallback_pair(fallback_dir, fallback_margin)?;
         let tokens = parse_mask_tokens(mask_tokens)?;   // validate before the expensive model load
         if let Some(p) = ort_dylib { init_ort(&p)?; }   // load-dynamic: libonnxruntime from the `onnxruntime` wheel
         let mut inner = Inner::from_dir_with_device(std::path::Path::new(&dir), threads, device).map_err(err)?;
+        if let Some((dir, margin)) = fallback { inner = inner.with_fallback(std::path::Path::new(&dir), margin).map_err(err)?; }
         inner.set_mask_tokens(tokens);
         Ok(PyMasker { inner })
     }
@@ -73,6 +91,9 @@ impl PyMasker {
     fn device(&self) -> &'static str { self.inner.device() }
     #[getter]
     fn fallback_reason(&self) -> Option<String> { self.inner.fallback_reason().map(str::to_owned) }
+
+    /// (windows, windows rerun on the fallback model), summed over batch workers.
+    fn fallback_stats(&self) -> (u64, u64) { self.inner.fallback_stats() }
 
     #[pyo3(signature = (texts, types=None, backstop=false, *, workers=1))]
     fn predict_many(&mut self, py: Python<'_>, texts: Vec<String>, types: Option<Vec<String>>, backstop: bool, workers: usize) -> PyResult<Vec<Vec<(usize, usize, String, f32)>>> {
@@ -124,6 +145,7 @@ impl PyMasker {
 #[pymodule]
 fn _koredact(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyMasker>()?;
+    m.add_function(wrap_pyfunction!(check_fallback, m)?)?;
     m.add("DECODER_VERSION", crate::DECODER_VERSION)?;
     m.add("ENTITY_TYPES", EntityType::TRAINED.map(|t| t.as_str()).to_vec())?;   // model types; NUM is backstop-only
     m.add("BACKSTOP_NUM_TYPE", EntityType::Num.as_str())?;

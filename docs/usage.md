@@ -82,7 +82,7 @@ CUDA 13 환경용 별도 설치 예시:
 ```sh
 uv venv .venv-gpu
 uv pip install --python .venv-gpu/bin/python 'onnxruntime-gpu[cuda,cudnn]==1.29.0' 'huggingface_hub>=0.30'
-uv pip install --python .venv-gpu/bin/python --no-deps 'koredact==0.4.0'
+uv pip install --python .venv-gpu/bin/python --no-deps 'koredact==0.5.0'
 ```
 
 GPU 배포판의 패키지 이름은 `onnxruntime-gpu`, 모듈 이름은 `onnxruntime`.
@@ -111,10 +111,45 @@ spans = masker.predict_many(["홍길동", "a@example.test"], workers=2)
 
 설계 근거·측정 결과: [배치 세션 기록](research/2026-10-15-batch-session-pool.md).
 
+## 마진 게이트 캐스케이드
+
+빠른 모델(양자화 번들 등) 우선 실행, 확신이 낮은 창만 정밀 모델로 재실행하는 opt-in 옵션.
+기본 대체 모델·기본 마진 없음. 미지정 시 기존 동작.
+
+```python
+from koredact import DEFAULT_REPO, Masker
+
+masker = Masker.from_pretrained(
+    "/models/koredact-w8a8",       # 빠른 모델 번들: 로컬 경로 또는 Hub 저장소
+    fallback_repo=DEFAULT_REPO,    # 정밀 모델 번들(fp32)
+    fallback_margin=2.5,           # 재실행 기준 로짓 차
+)
+masker.mask("문의 010-1234-5678 홍길동")
+windows, rerun = masker.fallback_stats()   # 처리 창 수, 정밀 모델 재실행 창 수
+```
+
+- 판정: 400자 창마다 빠른 모델 로짓에서 비특수 토큰별 top-1·top-2 차 계산. 최솟값이 `fallback_margin` 미만이면
+  같은 창을 정밀 모델로 재실행, 그 창 전체에 정밀 모델 로짓 사용. 최솟값이 `fallback_margin`과 같거나 크면 빠른 모델 유지.
+- 로컬 번들: `Masker(dir, fallback_dir=..., fallback_margin=...)`. 한쪽만 지정, 0 이하·NaN·무한대 마진은 `ValueError`.
+  Hub 대체 번들은 `fallback_repo`·`fallback_revision`, 기본 번들과 같은 파일만 다운로드.
+- `from_pretrained`: 대체 옵션을 다운로드 전에 검증. `fallback_repo` 없는 `fallback_revision`도 `ValueError`.
+- 대체 번들 조건: `config.json` 라벨 맵과 `tokenizer.json`·`tokenizer_config.json` 바이트 일치 필수, 불일치 시 생성 오류.
+  ONNX 그래프와 라벨 외 `config.json` 필드는 차이 허용.
+- 정밀 모델 세션: 같은 `threads`·`device`, 같은 CPU 재시도 규칙. `device`·`fallback_reason`은 빠른 모델 세션 기준.
+- 메모리: 두 모델 동시 적재. 배치 워커마다 두 세션, 최대 `workers` × (빠른 모델 + 정밀 모델).
+- 모니터링: `fallback_stats()`는 생성 이후 누적 `(처리 창 수, 재실행 창 수)`, 배치 워커 합산. 재실행 비율 상승 시
+  입력 분포 변화 신호, 속도 이득 감소.
+- 재실행하지 않은 창의 점수(`score`)는 빠른 모델 값. 정밀 모델과의 동일성 기준은 스팬 위치·유형.
+- 마진 선택: 배포 플랫폼·대표 데이터에서 두 모델의 최대 절대 로짓 차 ε 측정 후 `fallback_margin > 2ε`, 여유 포함.
+  측정 ε는 미관측 입력의 상한 아님.
+
+근거·측정 결과: [캐스케이드 기록](research/2026-10-15-margin-cascade.md).
+
 ## Rust 사용
 
 - 기존 `Masker::from_dir(dir, threads)` 호출 유지.
 - 장치 지정: `Masker::from_dir_with_device(dir, threads, "cpu")`.
+- 캐스케이드: `Masker::from_dir_with_device(fast, threads, "cpu")?.with_fallback(exact, 2.5)?`, 통계 `fallback_stats()`.
 - 가속기 등록: `load-dynamic` 빌드에서 지원. 기본 정적 CPU 빌드에서는 CPU 대체.
 
 공식 근거·실측 결과·하드웨어별 검증 한계: [런타임 설계 기록](research/2026-09-23-runtime-options.md).

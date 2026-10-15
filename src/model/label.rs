@@ -11,9 +11,10 @@ use crate::types::{EntityType, Span};
 struct Config { id2label: BTreeMap<String, String> }
 
 /// Per-label (bi, type): `B-X` → (true, Some(X)), `I-X` → (false, Some(X)), `O`/unknown → (false, None) with the raw tag kept.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Label { pub is_begin: bool, pub tag: String, pub entity: Option<EntityType> }
 
+#[derive(PartialEq)]
 pub struct Labels(pub Vec<Label>);
 
 impl Labels {

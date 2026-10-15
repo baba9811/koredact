@@ -49,21 +49,29 @@ def _onnxruntime_dylib() -> str:
 
 class Masker:
     def __init__(self, bundle_dir: str | os.PathLike, *, threads: int = 1, ort_dylib: str | None = None,
-                 mask_tokens: Mapping[str, str] | None = None, device: str = "auto"):
-        """`mask_tokens` overrides the replacement text per type (default `[TYPE]`); unknown types raise ValueError."""
+                 mask_tokens: Mapping[str, str] | None = None, device: str = "auto",
+                 fallback_dir: str | os.PathLike | None = None, fallback_margin: float | None = None):
+        """`mask_tokens` overrides the replacement text per type (default `[TYPE]`); unknown types raise ValueError.
+        `fallback_dir` + `fallback_margin` (both or neither) opt into the margin-gated cascade: a window whose smallest
+        top-1 minus top-2 logit gap is below the margin is rerun on the fallback bundle (same labels and tokenizer)."""
         self._inner = _koredact.Masker(str(bundle_dir), ort_dylib or _onnxruntime_dylib(), threads,
-                                       None if mask_tokens is None else {str(k): str(v) for k, v in mask_tokens.items()}, device=device)
+                                       None if mask_tokens is None else {str(k): str(v) for k, v in mask_tokens.items()}, device=device,
+                                       fallback_dir=None if fallback_dir is None else str(fallback_dir), fallback_margin=fallback_margin)
 
     @classmethod
     def from_pretrained(cls, repo_id: str = DEFAULT_REPO, *, revision: str | None = None, threads: int = 1,
                         mask_tokens: Mapping[str, str] | None = None, device: str = "auto",
-                        ort_dylib: str | None = None) -> "Masker":
-        """Download (cached) the bundle from the Hub, or accept a local directory path."""
-        if Path(repo_id).is_dir():
-            return cls(repo_id, threads=threads, mask_tokens=mask_tokens, device=device, ort_dylib=ort_dylib)
-        from huggingface_hub import snapshot_download
-        local = snapshot_download(repo_id, revision=revision, allow_patterns=BUNDLE_FILES)
-        return cls(local, threads=threads, mask_tokens=mask_tokens, device=device, ort_dylib=ort_dylib)
+                        ort_dylib: str | None = None, fallback_repo: str | None = None,
+                        fallback_revision: str | None = None, fallback_margin: float | None = None) -> "Masker":
+        """Download (cached) the bundle from the Hub, or accept a local directory path; `fallback_repo` likewise.
+        Fallback options are validated before anything is downloaded."""
+        _koredact.check_fallback(fallback_repo is not None, fallback_margin)
+        if fallback_revision is not None and fallback_repo is None:
+            raise ValueError("fallback_revision requires fallback_repo")
+        bundle = _bundle(repo_id, revision)
+        fallback_dir = None if fallback_repo is None else _bundle(fallback_repo, fallback_revision)
+        return cls(bundle, threads=threads, mask_tokens=mask_tokens, device=device, ort_dylib=ort_dylib,
+                   fallback_dir=fallback_dir, fallback_margin=fallback_margin)
 
     @property
     def device(self) -> str:
@@ -73,6 +81,10 @@ class Masker:
     @property
     def fallback_reason(self) -> str | None:
         return self._inner.fallback_reason
+
+    def fallback_stats(self) -> tuple[int, int]:
+        """(windows, windows rerun on the fallback model) summed over batch workers; (0, 0) without a fallback."""
+        return self._inner.fallback_stats()
 
     def predict_many(self, texts: Iterable[str], types: Iterable[str] | None = None, *,
                      backstop: bool = False, workers: int = 1) -> list[list[Span]]:
@@ -104,6 +116,13 @@ class Masker:
     def mask(self, text: str, types: Iterable[str] | None = None, *, backstop: bool = False) -> str:
         """Masked text. Same options as `predict`; `types` restricts masking, the rest stays in clear text."""
         return self._inner.mask(text, _types(types), backstop)
+
+
+def _bundle(repo_id: str, revision: str | None) -> str:
+    if Path(repo_id).is_dir():
+        return repo_id
+    from huggingface_hub import snapshot_download
+    return snapshot_download(repo_id, revision=revision, allow_patterns=BUNDLE_FILES)
 
 
 def _types(types: Iterable[str] | None) -> list[str] | None:

@@ -32,4 +32,28 @@ else:raise AssertionError('zero workers accepted')
 try:cpu.mask_many(texts,workers=2,types=['INVALID'])
 except ValueError:pass
 else:raise AssertionError('invalid types accepted in batch')
+cascade=koredact.Masker(bundle,device='cpu',fallback_dir=bundle,fallback_margin=1e30)   # 같은 번들 대체: 모든 창 재실행, 출력 동일
+assert cascade.fallback_stats()==(0,0)==cpu.fallback_stats()
+assert cascade.predict_many(texts,workers=2)==[cascade.predict(text) for text in texts]==[cpu.predict(text) for text in texts]
+assert cascade.fallback_stats()==(10,8)   # 창 5개 × 2회 · 빈 입력 창은 비특수 토큰 없어 재실행 제외
+hub=koredact.Masker.from_pretrained(str(bundle),device='cpu',mask_tokens={'NUM':'***'},fallback_repo=str(bundle),fallback_margin=2.5)
+assert hub.mask_many(texts,workers=3,backstop=True)==expected and hub.fallback_stats()[0]==5
+for kwargs in ({'fallback_dir':bundle},{'fallback_margin':1.0},*({'fallback_dir':bundle,'fallback_margin':m} for m in (0,-1.0,float('nan'),float('inf'),float('-inf')))):
+    try:koredact.Masker(bundle,**kwargs)
+    except ValueError:pass
+    else:raise AssertionError(f'invalid fallback accepted: {kwargs}')
+try:koredact.Masker.from_pretrained(str(bundle),fallback_repo=str(bundle))
+except ValueError:pass
+else:raise AssertionError('fallback_repo without fallback_margin accepted')
+from unittest import mock
+with mock.patch('huggingface_hub.snapshot_download',return_value=str(bundle)) as download:   # 잘못된 대체 옵션은 다운로드 전에 거부
+    for kwargs in ({'fallback_repo':'org/fallback'},{'fallback_margin':2.5},{'fallback_revision':'abc'},{'fallback_revision':'abc','fallback_margin':2.5},
+                   *({'fallback_repo':'org/fallback','fallback_margin':m} for m in (0,-1.0,float('nan'),float('inf')))):
+        for repo in (str(bundle),'org/primary'):
+            try:koredact.Masker.from_pretrained(repo,**kwargs)
+            except ValueError:pass
+            else:raise AssertionError(f'invalid fallback accepted before download: {kwargs}')
+    assert download.call_count==0,download.call_args_list
+    koredact.Masker.from_pretrained(str(bundle),device='cpu',fallback_repo='org/fallback',fallback_revision='abc',fallback_margin=2.5)
+    download.assert_called_once_with('org/fallback',revision='abc',allow_patterns=koredact.BUNDLE_FILES)
 print('runtime options and ordered worker checks passed')
