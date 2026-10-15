@@ -24,7 +24,8 @@ Python smoke에서 장치 선택·CPU 대체·배치 순서 등 `runtime_options
 
 ## ORT 런타임 검사
 
-설치된 ORT 라이브러리를 지정한 세션 실패·NaN·무한대의 CPU 재시도, 배치 세션 재사용·치환 문자열 반영 검사:
+설치된 ORT 라이브러리를 지정한 세션 실패·NaN·무한대의 CPU 재시도, 배치 세션 재사용·치환 문자열 반영,
+캐스케이드 대체 모델 적용·추가 세션 복제 검사:
 
 ```sh
 ORT_DYLIB_PATH="$(.venv/bin/python -c 'from koredact import _onnxruntime_dylib; print(_onnxruntime_dylib())')" \
@@ -34,3 +35,4 @@ ORT_DYLIB_PATH="$(.venv/bin/python -c 'from koredact import _onnxruntime_dylib; 
 - 구조·의존 방향·릴리스 규칙: [AGENTS.md](../AGENTS.md).
 - 공개 데이터 대조 결과 및 실기 검증 범위: [런타임 설계 기록](research/2026-09-23-runtime-options.md).
 - 배치 세션 재사용·동적 배분 근거와 측정: [배치 세션 기록](research/2026-10-15-batch-session-pool.md).
+- 마진 게이트 캐스케이드 근거와 측정: [캐스케이드 기록](research/2026-10-15-margin-cascade.md).
