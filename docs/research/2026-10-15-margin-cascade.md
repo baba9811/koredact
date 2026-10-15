@@ -44,6 +44,8 @@ fp32로 재실행되면 `predict` 스팬의 (start, end, type)은 fp32와 동일
 - 공개 계약: Rust `Masker::with_fallback(dir, margin)`·`fallback_stats()`. Python `Masker(..., fallback_dir=, fallback_margin=)`,
   `Masker.from_pretrained(..., fallback_repo=, fallback_revision=, fallback_margin=)`, `fallback_stats()`. 기본값 없음,
   `DEFAULT_REPO` 유지.
+- Python 검증: 대체 번들·마진 쌍과 마진 값은 생성자와 같은 Rust 검사 사용. `from_pretrained`는 다운로드 전에 검사,
+  `fallback_repo` 없는 `fallback_revision`은 `ValueError`.
 - 모듈 위치: 판정은 `model/cascade.rs`(창 로짓 선택·카운터), 조합은 `lib.rs` 파사드(대체 번들 검사·적재·추가 세션 복제).
 - 판정: 창마다 빠른 모델 실행 후 비특수 토큰의 top-1·top-2 로짓 차 최솟값이 τ 미만이면 같은 인코딩으로 정밀 모델 실행,
   그 창 전체(argmax·softmax 점수·이후 단계)에 정밀 모델 로짓 사용. τ와 같으면 빠른 모델 유지. 동점은 차 0으로 재실행.
@@ -73,6 +75,8 @@ fp32로 재실행되면 `predict` 스팬의 (start, end, type)은 fp32와 동일
 - Python: 로컬 빌드 휠로 smoke·`runtime_options.py` 통과(ONNX Runtime 1.29.0). 같은 번들 대체 시 `predict_many(workers=2)`,
   순차 `predict`, 캐스케이드 없는 출력 모두 동일. `fallback_stats()` = (10, 8): 창 5개 × 2회, 빈 입력 창은 재실행 제외.
   `from_pretrained(fallback_repo=로컬 경로)` 배치 마스킹 동일. 한쪽만 지정, 0·음수·NaN·±무한대 마진은 `ValueError`.
+  다운로드 모의 검사: 잘못된 대체 옵션 8종(로컬·Hub 기본 번들 각각) 다운로드 호출 0회, 정상 옵션은 대체 저장소 1회 호출
+  (`revision`·`allow_patterns` 일치).
 - macOS 27.0.1 링커 문제로 로컬 확장 모듈은 `maturin develop --release -- -C link-arg=-Wl,-fixup_chains`로 빌드(해당 크레이트만
   적용). 같은 값을 `RUSTFLAGS`로 주면 proc-macro 빌드 실패(`rustversion` 미발견). Rust 검사는 플래그 없이 실행, 저장소 빌드
   설정 미변경.

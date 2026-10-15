@@ -51,8 +51,8 @@ impl Masker {
 
     /// Opt-in margin-gated cascade. Each window runs on this Masker's model first; when the smallest top-1 minus top-2
     /// logit gap over its non-special tokens is below `margin`, the window is rerun on the `dir` bundle and that model's
-    /// logits replace the whole window. The bundle must carry the same label map and byte-identical tokenizer files
-    /// (only `onnx/model.onnx` may differ); it loads with this Masker's threads and device preference.
+    /// logits replace the whole window. The bundle must carry the same label map and byte-identical tokenizer files; its
+    /// ONNX graph and non-label `config.json` fields may differ. It loads with this Masker's threads and device preference.
     pub fn with_fallback(self, dir: &Path, margin: f32) -> Result<Masker, Error> {
         self.attach_fallback(dir, margin, Arc::default())
     }
@@ -189,7 +189,7 @@ fn bundle_dir(dir: &Path) -> Result<PathBuf, Error> {
     Ok(dir)
 }
 
-/// 대체 번들 검사 · 라벨 맵과 토크나이저 파일 바이트가 기본 번들과 같아야 함, ONNX 그래프만 차이 허용
+/// 대체 번들 검사 · 라벨 맵과 토크나이저 파일 바이트가 기본 번들과 같아야 함, ONNX 그래프와 라벨 외 `config.json` 필드는 차이 허용
 /// 토큰화·라벨이 다르면 같은 창의 로짓 행이 서로 다른 토큰·라벨을 가리킴
 fn fallback_dir(primary: &Path, labels: &model::label::Labels, dir: &Path) -> Result<PathBuf, Error> {
     let dir = bundle_dir(dir)?;

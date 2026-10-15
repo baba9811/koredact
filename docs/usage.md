@@ -132,8 +132,9 @@ windows, rerun = masker.fallback_stats()   # 처리 창 수, 정밀 모델 재�
   같은 창을 정밀 모델로 재실행, 그 창 전체에 정밀 모델 로짓 사용. 최솟값이 `fallback_margin`과 같거나 크면 빠른 모델 유지.
 - 로컬 번들: `Masker(dir, fallback_dir=..., fallback_margin=...)`. 한쪽만 지정, 0 이하·NaN·무한대 마진은 `ValueError`.
   Hub 대체 번들은 `fallback_repo`·`fallback_revision`, 기본 번들과 같은 파일만 다운로드.
-- 대체 번들 조건: `config.json` 라벨 맵, `tokenizer.json`·`tokenizer_config.json` 바이트 일치. `onnx/model.onnx`만 차이 허용,
-  불일치 시 생성 오류.
+- `from_pretrained`: 대체 옵션을 다운로드 전에 검증. `fallback_repo` 없는 `fallback_revision`도 `ValueError`.
+- 대체 번들 조건: `config.json` 라벨 맵과 `tokenizer.json`·`tokenizer_config.json` 바이트 일치 필수, 불일치 시 생성 오류.
+  ONNX 그래프와 라벨 외 `config.json` 필드는 차이 허용.
 - 정밀 모델 세션: 같은 `threads`·`device`, 같은 CPU 재시도 규칙. `device`·`fallback_reason`은 빠른 모델 세션 기준.
 - 메모리: 두 모델 동시 적재. 배치 워커마다 두 세션, 최대 `workers` × (빠른 모델 + 정밀 모델).
 - 모니터링: `fallback_stats()`는 생성 이후 누적 `(처리 창 수, 재실행 창 수)`, 배치 워커 합산. 재실행 비율 상승 시
