@@ -45,4 +45,15 @@ for kwargs in ({'fallback_dir':bundle},{'fallback_margin':1.0},*({'fallback_dir'
 try:koredact.Masker.from_pretrained(str(bundle),fallback_repo=str(bundle))
 except ValueError:pass
 else:raise AssertionError('fallback_repo without fallback_margin accepted')
+from unittest import mock
+with mock.patch('huggingface_hub.snapshot_download',return_value=str(bundle)) as download:   # 잘못된 대체 옵션은 다운로드 전에 거부
+    for kwargs in ({'fallback_repo':'org/fallback'},{'fallback_margin':2.5},{'fallback_revision':'abc'},{'fallback_revision':'abc','fallback_margin':2.5},
+                   *({'fallback_repo':'org/fallback','fallback_margin':m} for m in (0,-1.0,float('nan'),float('inf')))):
+        for repo in (str(bundle),'org/primary'):
+            try:koredact.Masker.from_pretrained(repo,**kwargs)
+            except ValueError:pass
+            else:raise AssertionError(f'invalid fallback accepted before download: {kwargs}')
+    assert download.call_count==0,download.call_args_list
+    koredact.Masker.from_pretrained(str(bundle),device='cpu',fallback_repo='org/fallback',fallback_revision='abc',fallback_margin=2.5)
+    download.assert_called_once_with('org/fallback',revision='abc',allow_patterns=koredact.BUNDLE_FILES)
 print('runtime options and ordered worker checks passed')

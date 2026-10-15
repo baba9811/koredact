@@ -63,7 +63,11 @@ class Masker:
                         mask_tokens: Mapping[str, str] | None = None, device: str = "auto",
                         ort_dylib: str | None = None, fallback_repo: str | None = None,
                         fallback_revision: str | None = None, fallback_margin: float | None = None) -> "Masker":
-        """Download (cached) the bundle from the Hub, or accept a local directory path; `fallback_repo` likewise."""
+        """Download (cached) the bundle from the Hub, or accept a local directory path; `fallback_repo` likewise.
+        Fallback options are validated before anything is downloaded."""
+        _koredact.check_fallback(fallback_repo is not None, fallback_margin)
+        if fallback_revision is not None and fallback_repo is None:
+            raise ValueError("fallback_revision requires fallback_repo")
         bundle = _bundle(repo_id, revision)
         fallback_dir = None if fallback_repo is None else _bundle(fallback_repo, fallback_revision)
         return cls(bundle, threads=threads, mask_tokens=mask_tokens, device=device, ort_dylib=ort_dylib,
