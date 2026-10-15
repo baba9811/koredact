@@ -82,7 +82,7 @@ CUDA 13 환경용 별도 설치 예시:
 ```sh
 uv venv .venv-gpu
 uv pip install --python .venv-gpu/bin/python 'onnxruntime-gpu[cuda,cudnn]==1.29.0' 'huggingface_hub>=0.30'
-uv pip install --python .venv-gpu/bin/python --no-deps 'koredact==0.4.0'
+uv pip install --python .venv-gpu/bin/python --no-deps 'koredact==0.5.0'
 ```
 
 GPU 배포판의 패키지 이름은 `onnxruntime-gpu`, 모듈 이름은 `onnxruntime`.
